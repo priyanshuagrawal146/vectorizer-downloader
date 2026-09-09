@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vectorizer.AI SVG Extractor & Downloader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="glow-bg"></div>
+  <div class="glow-bg-secondary"></div>
+
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="logo-badge">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>Vectorizer<span>.Extractor</span></h1>
+          <p class="subtitle">Direct Vector Stream & SVG Geometry Decoder</p>
+        </div>
+      </div>
+      <div class="header-badges">
+        <span class="badge badge-pulse"><span class="pulse-dot"></span> WebStream Engine Active</span>
+        <span class="badge badge-accent">No Paywall / Full Resolution</span>
+      </div>
+    </header>
+
+    <!-- Main Input Card -->
+    <section class="card input-card">
+      <div class="card-body">
+        <label for="urlInput" class="input-label">
+          <span>Vectorizer.AI Image URL or Token</span>
+          <button id="sampleBtn" class="btn-link" type="button">Use Sample URL</button>
+        </label>
+        
+        <form id="extractForm" class="input-form">
+          <div class="input-wrapper">
+            <div class="input-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+              </svg>
+            </div>
+            <input 
+              type="text" 
+              id="urlInput" 
+              name="urlInput" 
+              placeholder="https://vectorizer.ai/images/1788848214397-9ab9555d7ad0bc29-.../edit" 
+              autocomplete="off" 
+              spellcheck="false"
+              required
+            />
+            <button id="pasteBtn" class="btn-icon" type="button" title="Paste from clipboard">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+              </svg>
+            </button>
+          </div>
+
+          <div class="form-options-row">
+            <div class="option-group">
+              <span class="option-title">SVG Layer Structure:</span>
+              <div class="segmented-control">
+                <label class="seg-btn">
+                  <input type="radio" name="groupByOption" value="none" checked>
+                  <span>Standard Layering</span>
+                </label>
+                <label class="seg-btn">
+                  <input type="radio" name="groupByOption" value="color">
+                  <span>🎨 Group by Color (&lt;g&gt;)</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <button id="submitBtn" type="submit" class="btn btn-primary">
+            <span class="btn-text">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              Extract Vector SVG
+            </span>
+            <span class="btn-loader">
+              <span class="spinner"></span> Extracting...
+            </span>
+          </button>
+        </form>
+
+        <!-- Progress Container -->
+        <div id="progressContainer" class="progress-section hidden">
+          <div class="progress-header">
+            <span id="progressStatus" class="progress-status">Connecting to stream...</span>
+            <span id="progressPercent" class="progress-percent">0%</span>
+          </div>
+          <div class="progress-bar-track">
+            <div id="progressBar" class="progress-bar-fill" style="width: 0%;"></div>
+          </div>
+          <div class="progress-steps">
+            <div class="step" id="step-meta"><span class="step-icon"></span> Metadata</div>
+            <div class="step" id="step-ws"><span class="step-icon"></span> WebSocket</div>
+            <div class="step" id="step-chunks"><span class="step-icon"></span> Vector Chunks</div>
+            <div class="step" id="step-compile"><span class="step-icon"></span> SVG Geometry</div>
+          </div>
+        </div>
+
+        <!-- Error Container -->
+        <div id="errorContainer" class="error-banner hidden">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <div class="error-text" id="errorMessage">Extraction failed</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Result & Preview Section -->
+    <section id="resultSection" class="result-section hidden">
+      <div class="result-grid">
+        <!-- Preview Column -->
+        <div class="card preview-card">
+          <div class="preview-header">
+            <div class="preview-title">
+              <span class="indicator-dot"></span>
+              <span id="resultFilename">vector_result.svg</span>
+            </div>
+            
+            <div class="preview-controls">
+              <!-- Background switcher -->
+              <div class="bg-switcher" title="Change canvas background">
+                <button class="bg-opt active" data-bg="grid-dark" title="Dark Grid"></button>
+                <button class="bg-opt" data-bg="grid-light" title="Light Grid"></button>
+                <button class="bg-opt" data-bg="checker" title="Checkerboard"></button>
+                <button class="bg-opt" data-bg="black" title="Pure Black"></button>
+                <button class="bg-opt" data-bg="white" title="Pure White"></button>
+              </div>
+
+              <div class="divider-v"></div>
+
+              <!-- View toggles -->
+              <button id="toggleWireframe" class="btn-tool" title="Toggle Outlines / Wireframe">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                  <polygon points="2 17 12 22 22 17 12 12 2 17"></polygon>
+                </svg>
+                <span>Wireframe</span>
+              </button>
+
+              <button id="resetZoomBtn" class="btn-tool" title="Reset Zoom">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  <line x1="11" y1="8" x2="11" y2="14"></line>
+                  <line x1="8" y1="11" x2="14" y2="11"></line>
+                </svg>
+                <span>100%</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="viewportContainer" class="svg-viewport grid-dark">
+            <div id="svgContainer" class="svg-canvas">
+              <!-- Generated SVG inserted here -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Sidebar / Actions & Stats -->
+        <div class="sidebar-column">
+          <!-- Action Buttons Card -->
+          <div class="card action-card">
+            <h3 class="card-heading">Export Actions</h3>
+            <div class="action-buttons">
+              <button id="downloadSvgBtn" class="btn btn-primary btn-block">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                Download SVG File
+              </button>
+
+              <button id="downloadPngBtn" class="btn btn-secondary btn-block">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                  <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+                Export High-Res PNG (4x)
+              </button>
+
+              <button id="copySvgBtn" class="btn btn-outline btn-block">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span id="copyBtnText">Copy SVG Code</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Stats Card -->
+          <div class="card stats-card">
+            <h3 class="card-heading">Vector Properties</h3>
+            <div class="stats-grid">
+              <div class="stat-item">
+                <span class="stat-label">Dimensions</span>
+                <span id="statDims" class="stat-value">1536 × 1024</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Vector Shapes</span>
+                <span id="statShapes" class="stat-value">205</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Curve Loops</span>
+                <span id="statLoops" class="stat-value">403</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Color Count</span>
+                <span id="statColors" class="stat-value">35</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">File Size</span>
+                <span id="statSize" class="stat-value">125 KB</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Extract Time</span>
+                <span id="statTime" class="stat-value">2.7s</span>
+              </div>
+            </div>
+
+            <!-- Color Palette preview -->
+            <div class="palette-section">
+              <span class="palette-title">Color Palette</span>
+              <div id="paletteSwatches" class="palette-swatches"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Recent History Section -->
+    <section id="historySection" class="history-section hidden">
+      <div class="history-header">
+        <h2>Recent Extractions</h2>
+        <button id="clearHistoryBtn" class="btn-link">Clear History</button>
+      </div>
+      <div id="historyList" class="history-grid"></div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>Vectorizer.AI Vector Extraction Engine • Full Bezier Geometry & Vector Interface Reconstruction</p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
