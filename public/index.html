@@ -12,6 +12,7 @@
   <script src="libs/three.min.js"></script>
   <script src="libs/OrbitControls.js"></script>
   <script src="libs/SVGLoader.js"></script>
+  <script src="libs/jszip.min.js"></script>
 </head>
 <body>
   <div class="glow-bg"></div>
@@ -450,17 +451,18 @@
                 Download BambuLab Package (.ZIP)
               </span>
               <span class="btn-loader">
-                <span class="spinner"></span> Processing in Blender...
+                <span class="spinner"></span> Generating 3D Package...
               </span>
             </button>
 
             <div class="export-sub-buttons">
-              <button id="btnExportBlend" class="btn btn-secondary">
+              <button id="btnExport3mf" class="btn btn-secondary">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <polygon points="12 8 8 12 12 16 16 12 12 8"></polygon>
+                  <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                  <path d="M2 17l10 5 10-5"></path>
+                  <path d="M2 12l10 5 10-5"></path>
                 </svg>
-                Blender (.blend)
+                Bambu Studio (.3MF)
               </button>
               <button id="btnExportCombined" class="btn btn-outline">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

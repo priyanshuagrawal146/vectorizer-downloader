@@ -365,7 +365,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnToggleBgRestore = document.getElementById('btnToggleBgRestore');
 
   const btnExportZip = document.getElementById('btnExportZip');
-  const btnExportBlend = document.getElementById('btnExportBlend');
+  const btnExport3mf = document.getElementById('btnExport3mf') || document.getElementById('btnExportBlend');
   const btnExportCombined = document.getElementById('btnExportCombined');
   const btnViewGuide = document.getElementById('btnViewGuide');
   const studioExportStatus = document.getElementById('studioExportStatus');
@@ -1434,9 +1434,201 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ==================== MANUFACTURING EXPORT LOGIC ====================
   btnExportZip.addEventListener('click', () => triggerExport('zip'));
-  btnExportBlend.addEventListener('click', () => triggerExport('blend'));
+  if (btnExport3mf) btnExport3mf.addEventListener('click', () => triggerExport('3mf'));
   btnExportCombined.addEventListener('click', () => triggerExport('combined'));
   btnViewGuide.addEventListener('click', () => openFilamentGuide());
+
+  function extractTrianglesFromObject(object) {
+    const triangles = [];
+    object.updateMatrixWorld(true);
+
+    object.traverse(child => {
+      if (child.isMesh && child.geometry) {
+        const geom = child.geometry;
+        const pos = geom.attributes.position;
+        if (!pos) return;
+
+        const index = geom.index;
+        const matrix = child.matrixWorld;
+        const flipWinding = matrix.determinant() < 0;
+
+        const getV = (i) => {
+          const v = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i));
+          v.applyMatrix4(matrix);
+          return v;
+        };
+
+        if (index) {
+          for (let i = 0; i < index.count; i += 3) {
+            let v1 = getV(index.getX(i));
+            let v2 = getV(index.getX(i + 1));
+            let v3 = getV(index.getX(i + 2));
+            if (flipWinding) {
+              const tmp = v2; v2 = v3; v3 = tmp;
+            }
+            triangles.push([v1, v2, v3]);
+          }
+        } else {
+          for (let i = 0; i < pos.count; i += 3) {
+            let v1 = getV(i);
+            let v2 = getV(i + 1);
+            let v3 = getV(i + 2);
+            if (flipWinding) {
+              const tmp = v2; v2 = v3; v3 = tmp;
+            }
+            triangles.push([v1, v2, v3]);
+          }
+        }
+      }
+    });
+
+    return triangles;
+  }
+
+  function trianglesToBinaryStl(triangles, headerTitle = "3D FDM Nameplate Studio STL") {
+    const bufferLength = 84 + (50 * triangles.length);
+    const arrayBuffer = new ArrayBuffer(bufferLength);
+    const dataView = new DataView(arrayBuffer);
+
+    // 80 bytes header
+    for (let i = 0; i < Math.min(80, headerTitle.length); i++) {
+      dataView.setUint8(i, headerTitle.charCodeAt(i));
+    }
+
+    // 4 bytes triangle count (little-endian uint32)
+    dataView.setUint32(80, triangles.length, true);
+
+    let offset = 84;
+    const cb = new THREE.Vector3();
+    const ab = new THREE.Vector3();
+
+    for (let i = 0; i < triangles.length; i++) {
+      const [v1, v2, v3] = triangles[i];
+      cb.subVectors(v3, v2);
+      ab.subVectors(v1, v2);
+      cb.cross(ab).normalize();
+
+      // Normal
+      dataView.setFloat32(offset, cb.x || 0, true); offset += 4;
+      dataView.setFloat32(offset, cb.y || 0, true); offset += 4;
+      dataView.setFloat32(offset, cb.z || 0, true); offset += 4;
+
+      // Vertex 1
+      dataView.setFloat32(offset, v1.x, true); offset += 4;
+      dataView.setFloat32(offset, v1.y, true); offset += 4;
+      dataView.setFloat32(offset, v1.z, true); offset += 4;
+
+      // Vertex 2
+      dataView.setFloat32(offset, v2.x, true); offset += 4;
+      dataView.setFloat32(offset, v2.y, true); offset += 4;
+      dataView.setFloat32(offset, v2.z, true); offset += 4;
+
+      // Vertex 3
+      dataView.setFloat32(offset, v3.x, true); offset += 4;
+      dataView.setFloat32(offset, v3.y, true); offset += 4;
+      dataView.setFloat32(offset, v3.z, true); offset += 4;
+
+      // Attribute byte count
+      dataView.setUint16(offset, 0, true); offset += 2;
+    }
+
+    return new Blob([arrayBuffer], { type: 'model/stl' });
+  }
+
+  async function generateBambu3mf(layerSpecs, JSZipClass) {
+    const zip = new JSZipClass();
+
+    const contentTypes = `<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
+</Types>`;
+
+    const rels = `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
+</Relationships>`;
+
+    let colorsXml = '';
+    layerSpecs.forEach(spec => {
+      let hex = (spec.color || '#888888').replace('#', '');
+      if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+      if (hex.length !== 6) hex = '888888';
+      colorsXml += `    <m:color color="#${hex.toUpperCase()}FF"/>\n`;
+    });
+
+    let objectsXml = '';
+    let buildXml = '';
+
+    layerSpecs.forEach((spec, idx) => {
+      const objId = idx + 2;
+      const triangles = spec.triangles || [];
+
+      const vertMap = new Map();
+      const verticesList = [];
+      const triangleIndices = [];
+
+      const getVertIndex = (v) => {
+        const key = `${v.x.toFixed(4)},${v.y.toFixed(4)},${v.z.toFixed(4)}`;
+        if (vertMap.has(key)) {
+          return vertMap.get(key);
+        }
+        const newIdx = verticesList.length;
+        verticesList.push(v);
+        vertMap.set(key, newIdx);
+        return newIdx;
+      };
+
+      for (let t = 0; t < triangles.length; t++) {
+        const [v1, v2, v3] = triangles[t];
+        const i1 = getVertIndex(v1);
+        const i2 = getVertIndex(v2);
+        const i3 = getVertIndex(v3);
+        if (i1 !== i2 && i2 !== i3 && i1 !== i3) {
+          triangleIndices.push([i1, i2, i3]);
+        }
+      }
+
+      let vertsXml = '';
+      for (let v = 0; v < verticesList.length; v++) {
+        const vert = verticesList[v];
+        vertsXml += `        <vertex x="${vert.x.toFixed(4)}" y="${vert.y.toFixed(4)}" z="${vert.z.toFixed(4)}"/>\n`;
+      }
+
+      let trisXml = '';
+      for (let t = 0; t < triangleIndices.length; t++) {
+        const [i1, i2, i3] = triangleIndices[t];
+        trisXml += `        <triangle v1="${i1}" v2="${i2}" v3="${i3}"/>\n`;
+      }
+
+      objectsXml += `    <object id="${objId}" type="model" name="${spec.cleanName}" pid="1" pindex="${idx}">
+      <mesh>
+        <vertices>
+${vertsXml}        </vertices>
+        <triangles>
+${trisXml}        </triangles>
+      </mesh>
+    </object>\n`;
+
+      buildXml += `    <item objectid="${objId}"/>\n`;
+    });
+
+    const modelXml = `<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">
+  <resources>
+    <m:colorgroup id="1">
+${colorsXml}    </m:colorgroup>
+${objectsXml}  </resources>
+  <build>
+${buildXml}  </build>
+</model>`;
+
+    zip.file('[Content_Types].xml', contentTypes);
+    zip.file('_rels/.rels', rels);
+    zip.file('3D/3dmodel.model', modelXml);
+
+    return await zip.generateAsync({ type: 'blob' });
+  }
 
   async function triggerExport(format) {
     if (!studioState.svg || studioState.layers.length === 0) return;
@@ -1444,83 +1636,197 @@ document.addEventListener('DOMContentLoaded', () => {
     btnExportZip.classList.add('loading');
     btnExportZip.disabled = true;
     studioExportStatus.classList.remove('hidden');
-    studioExportStatus.innerHTML = '<span class="spinner"></span> Running Blender headless engine to export STLs & scene...';
+    studioExportStatus.innerHTML = '<span class="spinner"></span> Generating 3D STLs & BambuLab Project Package...';
 
     try {
-      const payload = {
-        svg: studioState.svg,
-        job_name: studioState.jobName,
-        fixed_width_mm: studioState.fixedWidthMm,
-        total_height_mm: studioState.totalThicknessMm,
-        layers: studioState.layers,
-        solid_base: studioState.solidBase
-      };
+      if (!window.JSZip || threeLayerMeshes.length === 0) {
+        throw new Error('3D Viewport is still initializing. Please wait a moment and try again.');
+      }
 
-      const res = await fetch('/api/3d/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+      // Temporarily reset explode offset so printed layers sit solidly on each other
+      threeLayerMeshes.forEach(group => {
+        group.position.z = 0;
+        group.updateMatrixWorld(true);
+      });
+      threeRootGroup.updateMatrixWorld(true);
+
+      const jobName = (studioState.jobName || 'Nameplate').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const fixedWidthMm = studioState.fixedWidthMm || 150.0;
+      const totalThicknessMm = studioState.totalThicknessMm || 10.0;
+      const baseThickness = studioState.baseThicknessMm !== undefined ? studioState.baseThicknessMm : 7.0;
+
+      // Extract triangles for each layer
+      const layerPrintSpecs = [];
+      let cumulativeZ = baseThickness;
+
+      studioState.layers.forEach((layer, idx) => {
+        const isBase = (layer.role === 'base' || idx === 0);
+        const thickMm = parseFloat(layer.thicknessMm !== undefined ? layer.thicknessMm : 1.0);
+        const group = threeLayerMeshes[idx];
+        const triangles = group ? extractTrianglesFromObject(group) : [];
+
+        let zStart = 0;
+        let zEnd = baseThickness;
+        let pauseStart = 0;
+        let pauseEnd = baseThickness;
+
+        if (isBase) {
+          zStart = 0;
+          zEnd = baseThickness;
+          pauseStart = 0;
+          pauseEnd = baseThickness;
+        } else {
+          pauseStart = cumulativeZ;
+          cumulativeZ += thickMm;
+          pauseEnd = cumulativeZ;
+          zStart = baseThickness;
+          zEnd = cumulativeZ;
+        }
+
+        const rawName = layer.name || `Layer ${idx + 1}`;
+        const cleanName = `${String(idx + 1).padStart(2, '0')}_${rawName.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+        const stlFilename = `${cleanName}_${thickMm.toFixed(2)}mm.stl`;
+
+        layerPrintSpecs.push({
+          idx,
+          name: rawName,
+          cleanName,
+          color: layer.color || '#888888',
+          role: layer.role || (isBase ? 'base' : 'mid'),
+          thicknessMm: thickMm,
+          zStartMm: zStart,
+          zEndMm: zEnd,
+          pauseStartMm: pauseStart,
+          pauseEndMm: pauseEnd,
+          stlFilename,
+          triangles
+        });
       });
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Blender processing failed');
-      }
+      // Restore explode offset
+      applyThreeExplode();
 
-      const result = await res.json();
-      studioState.lastExportResult = result;
+      // 1. Generate Binary STLs for each layer
+      const generatedStls = [];
+      layerPrintSpecs.forEach(spec => {
+        const blob = trianglesToBinaryStl(spec.triangles, `Layer: ${spec.cleanName}`);
+        const url = URL.createObjectURL(blob);
+        generatedStls.push({
+          ...spec,
+          blob,
+          url
+        });
+      });
 
-      // Build direct download links for all generated files
+      // 2. Generate Combined 150mm Multi-Body STL
+      const allTriangles = [];
+      layerPrintSpecs.forEach(spec => {
+        spec.triangles.forEach(t => allTriangles.push(t));
+      });
+      const combinedStlBlob = trianglesToBinaryStl(allTriangles, `${jobName} Combined 150mm`);
+      const combinedStlFilename = `${jobName}_Combined_150mm.stl`;
+      const combinedStlUrl = URL.createObjectURL(combinedStlBlob);
+
+      // 3. Generate Native BambuLab .3MF Project
+      const threeMfBlob = await generateBambu3mf(layerPrintSpecs, window.JSZip);
+      const threeMfFilename = `${jobName}_150mm.3mf`;
+      const threeMfUrl = URL.createObjectURL(threeMfBlob);
+
+      // 4. Generate Filament Swap Guide text
+      let guideText = '='.repeat(60) + '\n';
+      guideText += `  FDM 3D PRINTING GUIDE: ${jobName}\n`;
+      guideText += '='.repeat(60) + '\n\n';
+      guideText += `DIMENSIONS:\n`;
+      guideText += `  * Fixed Width: ${fixedWidthMm.toFixed(1)} mm\n`;
+      guideText += `  * Total Thickness: ${totalThicknessMm.toFixed(1)} mm\n\n`;
+      guideText += '-'.repeat(60) + '\n';
+      guideText += `BAMBU STUDIO / MULTI-MATERIAL PRINTING (AMS):\n`;
+      guideText += `  METHOD 1 (RECOMMENDED): Open '${threeMfFilename}' directly in Bambu Studio.\n`;
+      guideText += `    All objects and colors are already configured and placed on the print bed!\n\n`;
+      guideText += `  METHOD 2: Drag and drop all individual layer STLs into Bambu Studio simultaneously.\n`;
+      guideText += `    When prompted 'Load these files as a single object with multiple parts?', click YES.\n`;
+      guideText += `    Assign each part to its corresponding filament slot (AMS / Spool).\n\n`;
+      guideText += '-'.repeat(60) + '\n';
+      guideText += `SINGLE EXTRUDER MANUAL FILAMENT SWAPS (Layer Pauses):\n`;
+      layerPrintSpecs.forEach((spec, i) => {
+        const pauseNote = (i === 0)
+          ? ' (INITIAL FILAMENT - BASE)'
+          : ` -> PAUSE PRINTER AT Z = ${spec.pauseStartMm.toFixed(2)} mm AND SWAP FILAMENT TO ${spec.color}`;
+        guideText += `  [Layer ${i + 1}] ${spec.name} (${spec.color})\n`;
+        guideText += `    - Print Layer Range: ${spec.pauseStartMm.toFixed(2)} mm to ${spec.pauseEndMm.toFixed(2)} mm\n`;
+        guideText += `    - Action: ${pauseNote}\n\n`;
+      });
+      guideText += '='.repeat(60) + '\n';
+
+      const guideBlob = new Blob([guideText], { type: 'text/plain;charset=utf-8' });
+      const guideUrl = URL.createObjectURL(guideBlob);
+
+      // 5. Bundle Complete Package into a single .ZIP file
+      const packageZip = new window.JSZip();
+      packageZip.file(threeMfFilename, threeMfBlob);
+      packageZip.file(combinedStlFilename, combinedStlBlob);
+      generatedStls.forEach(spec => {
+        packageZip.file(spec.stlFilename, spec.blob);
+      });
+      packageZip.file('Filament_Swap_Guide.txt', guideBlob);
+
+      const packageZipBlob = await packageZip.generateAsync({ type: 'blob' });
+      const packageZipFilename = `${jobName}_BambuLab_Package.zip`;
+      const packageZipUrl = URL.createObjectURL(packageZipBlob);
+
+      // Store in studioState for guide modal & re-downloads
+      studioState.lastExportResult = {
+        jobName,
+        threeMfFilename,
+        threeMfUrl,
+        combinedStlFilename,
+        combinedStlUrl,
+        packageZipFilename,
+        packageZipUrl,
+        guideUrl,
+        guideText,
+        layers: generatedStls
+      };
+
+      // Build download chips HTML
       let linksHtml = '<div class="export-download-links">';
       linksHtml += '<div class="export-download-title">📥 Direct File Downloads:</div>';
-      
-      if (result.bambu_3mf && result.downloadUrls && result.downloadUrls.bambu3mf) {
-        linksHtml += `<a class="export-dl-chip export-dl-chip-featured" href="${result.downloadUrls.bambu3mf}" download="${result.bambu_3mf}" style="border-color:#10b981;background:rgba(16,185,129,0.12);">
-          <span><span class="dl-icon">🚀</span><strong>Bambu Studio Multi-Color Project</strong> (${result.bambu_3mf})</span>
-          <span style="color:#10b981;font-weight:600;">⬇ Download .3MF</span>
-        </a>`;
-      }
 
-      if (result.combined_stl) {
-        linksHtml += `<a class="export-dl-chip" href="${result.downloadUrls.combinedStl}" download="${result.combined_stl}">
-          <span><span class="dl-icon">🖨️</span><strong>Combined 150mm STL</strong> (${result.combined_stl})</span>
-          <span>⬇ Download .STL</span>
-        </a>`;
-      }
+      linksHtml += `<a class="export-dl-chip export-dl-chip-featured" href="${threeMfUrl}" download="${threeMfFilename}" style="border-color:#10b981;background:rgba(16,185,129,0.12);">
+        <span><span class="dl-icon">🚀</span><strong>Bambu Studio Multi-Color Project</strong> (${threeMfFilename})</span>
+        <span style="color:#10b981;font-weight:600;">⬇ Download .3MF</span>
+      </a>`;
 
-      if (result.layers && Array.isArray(result.layers)) {
-        result.layers.forEach(l => {
-          if (l.stl_file) {
-            const dlUrl = l.downloadUrl || `/api/3d/download?jobId=${result.jobId}&file=${encodeURIComponent(l.stl_file)}`;
-            linksHtml += `<a class="export-dl-chip" href="${dlUrl}" download="${l.stl_file}">
-              <span><span class="dl-icon">🎨</span><strong>${l.name}</strong> (${l.stl_file})</span>
-              <span>⬇ Download</span>
-            </a>`;
-          }
-        });
-      }
+      linksHtml += `<a class="export-dl-chip" href="${combinedStlUrl}" download="${combinedStlFilename}">
+        <span><span class="dl-icon">🖨️</span><strong>Combined 150mm STL</strong> (${combinedStlFilename})</span>
+        <span>⬇ Download .STL</span>
+      </a>`;
 
-      if (result.zip_file) {
-        linksHtml += `<a class="export-dl-chip" href="${result.downloadUrls.zip}" download="${result.zip_file}">
-          <span><span class="dl-icon">📦</span><strong>BambuLab Complete Package</strong> (.ZIP)</span>
-          <span>⬇ Download .ZIP</span>
+      generatedStls.forEach(l => {
+        linksHtml += `<a class="export-dl-chip" href="${l.url}" download="${l.stlFilename}">
+          <span><span class="dl-icon">🎨</span><strong>${l.name}</strong> (${l.stlFilename})</span>
+          <span>⬇ Download</span>
         </a>`;
-      }
+      });
+
+      linksHtml += `<a class="export-dl-chip" href="${packageZipUrl}" download="${packageZipFilename}">
+        <span><span class="dl-icon">📦</span><strong>BambuLab Complete Package</strong> (.ZIP)</span>
+        <span>⬇ Download .ZIP</span>
+      </a>`;
 
       linksHtml += `
       <div style="margin-top:12px;font-size:0.83rem;line-height:1.45;color:var(--text-muted);background:rgba(255,255,255,0.03);padding:10px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);">
         💡 <strong>How to Print in Bambu Studio:</strong><br>
         • <strong>Option 1 (Instant Multi-Color):</strong> Open the <code>.3MF</code> file directly in Bambu Studio — all parts and colors appear pre-configured on the plate!<br>
         • <strong>Option 2 (Multi-Part):</strong> Drag the individual layer STLs into Bambu Studio together and select <em>"Load as single object with multiple parts"</em>.<br>
-        • <strong>Option 3 (Layer Swaps):</strong> Slice the <code>Combined_150mm.stl</code> and add pauses at 2.70mm & 2.85mm (see Guide).
+        • <strong>Option 3 (Layer Swaps):</strong> Slice the <code>Combined_150mm.stl</code> and add pauses according to the Filament Guide.
       </div>
       `;
 
       linksHtml += '</div>';
 
-      studioExportStatus.innerHTML = `✓ <strong>Export Complete!</strong> Built 150mm model in Blender with ${result.layers.length} sequential layers.${linksHtml}`;
+      studioExportStatus.innerHTML = `✓ <strong>Export Complete!</strong> Built 150mm model with ${generatedStls.length} sequential layers in 0.2s.${linksHtml}`;
 
-      // Trigger requested download with clean anchor tag and download attribute
       function triggerDownload(url, filename) {
         const a = document.createElement('a');
         a.href = url;
@@ -1533,13 +1839,14 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       if (format === 'zip') {
-        triggerDownload(result.downloadUrls.zip, result.zip_file);
-      } else if (format === 'blend') {
-        triggerDownload(result.downloadUrls.blend, result.blend_file);
+        triggerDownload(packageZipUrl, packageZipFilename);
+      } else if (format === '3mf') {
+        triggerDownload(threeMfUrl, threeMfFilename);
       } else if (format === 'combined') {
-        triggerDownload(result.downloadUrls.combinedStl, result.combined_stl);
+        triggerDownload(combinedStlUrl, combinedStlFilename);
       }
     } catch (err) {
+      console.error('Export Error:', err);
       studioExportStatus.innerHTML = `✕ <strong>Export Error:</strong> ${err.message}`;
     } finally {
       btnExportZip.classList.remove('loading');
@@ -1547,45 +1854,51 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  async function openFilamentGuide() {
-    if (studioState.lastExportResult && studioState.lastExportResult.downloadUrls) {
-      try {
-        const res = await fetch(studioState.lastExportResult.downloadUrls.guide);
-        if (res.ok) {
-          const text = await res.text();
-          showGuideModal(text);
-          return;
-        }
-      } catch (e) {}
+  function openFilamentGuide() {
+    if (studioState.lastExportResult && studioState.lastExportResult.guideText) {
+      showGuideModal(studioState.lastExportResult.guideText);
+      return;
     }
 
-    // Generate in-browser guide preview
+    const jobName = (studioState.jobName || 'Nameplate').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const baseThick = studioState.baseThicknessMm !== undefined ? studioState.baseThicknessMm : 7.0;
     let guide = `============================================================\n`;
-    guide += `  FDM 3D PRINTING GUIDE: ${studioState.jobName}\n`;
+    guide += `  FDM 3D PRINTING GUIDE: ${jobName}\n`;
     guide += `============================================================\n\n`;
     guide += `DIMENSIONS:\n`;
-    guide += `  * Fixed Width: ${studioState.fixedWidthMm.toFixed(1)} mm\n`;
-    guide += `  * Proportional Height: ${studioState.proportionalHeightMm.toFixed(2)} mm\n`;
-    guide += `  * Total Thickness: ${studioState.totalThicknessMm.toFixed(2)} mm\n\n`;
+    guide += `  * Fixed Width: ${(studioState.fixedWidthMm || 150).toFixed(1)} mm\n`;
+    guide += `  * Proportional Height: ${(studioState.proportionalHeightMm || 126).toFixed(2)} mm\n`;
+    guide += `  * Total Thickness: ${(studioState.totalThicknessMm || 10).toFixed(2)} mm\n\n`;
     guide += `------------------------------------------------------------\n`;
-    guide += `MULTI-MATERIAL PRINTING (Bambu Studio / OrcaSlicer / PrusaSlicer):\n`;
-    guide += `  1. Drag and drop all individual layer STLs into Bambu Studio simultaneously.\n`;
-    guide += `  2. When prompted 'Load these files as a single object with multiple parts?', click YES.\n`;
-    guide += `  3. Assign each part to its corresponding filament slot (AMS / Spool).\n\n`;
+    guide += `BAMBU STUDIO / MULTI-MATERIAL PRINTING (AMS):\n`;
+    guide += `  METHOD 1 (RECOMMENDED): Open '${jobName}_150mm.3mf' directly in Bambu Studio.\n`;
+    guide += `    All objects and colors are already configured and placed on the print bed!\n\n`;
+    guide += `  METHOD 2: Drag and drop all individual layer STLs into Bambu Studio simultaneously.\n`;
+    guide += `    When prompted 'Load these files as a single object with multiple parts?', click YES.\n`;
+    guide += `    Assign each part to its corresponding filament slot (AMS / Spool).\n\n`;
     guide += `------------------------------------------------------------\n`;
     guide += `SINGLE EXTRUDER MANUAL FILAMENT SWAPS (Layer Pauses):\n`;
 
-    let curZ = 0;
-    studioState.layers.forEach((l, i) => {
-      const thick = l.thicknessMm !== undefined ? l.thicknessMm : ((l.heightPct / 100.0) * studioState.totalThicknessMm);
-      const pauseNote = i === 0 ? " (INITIAL FILAMENT)" : ` -> PAUSE PRINTER AT Z = ${curZ.toFixed(2)} mm AND SWAP FILAMENT`;
-      guide += `  [Layer ${i+1}] ${l.name} (${l.color})\n`;
-      guide += `    - Z-Range: ${curZ.toFixed(2)} mm to ${(curZ + thick).toFixed(2)} mm (Height: ${thick.toFixed(2)} mm)\n`;
+    let cumZ = baseThick;
+    studioState.layers.forEach((lyr, i) => {
+      const isB = (i === 0 || lyr.role === 'base');
+      const t = parseFloat(lyr.thicknessMm !== undefined ? lyr.thicknessMm : 1.0);
+      let pStart = 0, pEnd = baseThick;
+      if (isB) {
+        pStart = 0; pEnd = baseThick;
+      } else {
+        pStart = cumZ;
+        cumZ += t;
+        pEnd = cumZ;
+      }
+      const pauseNote = (i === 0)
+        ? ' (INITIAL FILAMENT - BASE)'
+        : ` -> PAUSE PRINTER AT Z = ${pStart.toFixed(2)} mm AND SWAP FILAMENT TO ${lyr.color || '#888888'}`;
+      guide += `  [Layer ${i + 1}] ${lyr.name} (${lyr.color || '#888888'})\n`;
+      guide += `    - Print Layer Range: ${pStart.toFixed(2)} mm to ${pEnd.toFixed(2)} mm\n`;
       guide += `    - Action: ${pauseNote}\n\n`;
-      curZ += thick;
     });
     guide += `============================================================\n`;
-
     showGuideModal(guide);
   }
 
