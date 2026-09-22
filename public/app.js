@@ -1706,6 +1706,7 @@ ${buildXml}  </build>
 
       const jobName = (studioState.jobName || 'Nameplate').replace(/[^a-zA-Z0-9_-]/g, '_');
       const fixedWidthMm = studioState.fixedWidthMm || 150.0;
+      const totalThicknessMm = studioState.totalThicknessMm || 10.0;
       const baseLayer = studioState.layers.find(l => l.role === 'base') || studioState.layers[0];
       const baseThickness = Math.max(0.80, (baseLayer && baseLayer.thicknessMm !== undefined) ? baseLayer.thicknessMm : (studioState.layers[0]?.thicknessMm || 7.00));
 
@@ -1794,7 +1795,8 @@ ${buildXml}  </build>
       guideText += '='.repeat(60) + '\n\n';
       guideText += `DIMENSIONS:\n`;
       guideText += `  * Fixed Width: ${fixedWidthMm.toFixed(1)} mm\n`;
-      guideText += `  * Total Thickness: ${totalThicknessMm.toFixed(1)} mm\n\n`;
+      guideText += `  * Proportional Height: ${(studioState.proportionalHeightMm || 126).toFixed(2)} mm\n`;
+      guideText += `  * Total Thickness: ${(totalThicknessMm || studioState.totalThicknessMm || 10.0).toFixed(1)} mm\n\n`;
       guideText += '-'.repeat(60) + '\n';
       guideText += `BAMBU STUDIO / MULTI-MATERIAL PRINTING (AMS):\n`;
       guideText += `  METHOD 1 (RECOMMENDED): Open '${threeMfFilename}' directly in Bambu Studio.\n`;
