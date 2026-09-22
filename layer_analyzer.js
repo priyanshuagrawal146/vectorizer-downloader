@@ -442,7 +442,14 @@ function analyzeSvgLayers(svgContent, options = {}) {
 
   const totalBuckets = sortedBuckets.length;
   const upperCount = Math.max(1, totalBuckets - 1);
-  const defaultStepMm = (totalBuckets === 1) ? 0 : parseFloat((3.00 / upperCount).toFixed(2));
+  const minColorThickMm = 0.80;
+
+  // Default step for upper color layers: minimum 0.80 mm
+  const defaultStepMm = (totalBuckets === 1) ? 0 : Math.max(minColorThickMm, Math.min(1.50, parseFloat((3.00 / upperCount).toFixed(2))));
+  // Sum of upper color layers
+  const totalUpperThickness = (totalBuckets === 1) ? 0 : parseFloat((defaultStepMm * upperCount).toFixed(2));
+  // Base layer absorbs remainder so total is fully 10.00 mm
+  const baseThicknessMm = (totalBuckets === 1) ? 10.00 : Math.max(minColorThickMm, parseFloat((10.00 - totalUpperThickness).toFixed(2)));
 
   let cumulativeZ = 0;
   const assigned = sortedBuckets.map((bucket, index) => {
@@ -453,19 +460,17 @@ function analyzeSvgLayers(svgContent, options = {}) {
 
     if (bucket.tier === 0 || index === 0) {
       role = 'base';
-      heightPct = (totalBuckets === 1) ? 100 : 70;
-      thicknessMm = (totalBuckets === 1) ? 10.00 : 7.00;
+      thicknessMm = baseThicknessMm;
       name = 'Base Foundation';
     } else if (index === totalBuckets - 1) {
       role = (bucket.tier === 2) ? 'top' : 'mid';
       name = (bucket.tier === 2) ? `Raised Text (${bucket.color})` : `Artwork / Details (${bucket.color})`;
-      thicknessMm = parseFloat((10.00 - 7.00 - defaultStepMm * (upperCount - 1)).toFixed(2));
-      heightPct = parseFloat(((thicknessMm / 10.00) * 100).toFixed(1));
+      const precedingUpperMm = parseFloat((defaultStepMm * (upperCount - 1)).toFixed(2));
+      thicknessMm = Math.max(minColorThickMm, parseFloat((totalUpperThickness - precedingUpperMm).toFixed(2)));
     } else {
       role = 'mid';
       name = (bucket.tier === 2) ? `Raised Details (${bucket.color})` : `Artwork / Details (${bucket.color})`;
       thicknessMm = defaultStepMm;
-      heightPct = parseFloat(((thicknessMm / 10.00) * 100).toFixed(1));
     }
 
     const zStartMm = parseFloat(cumulativeZ.toFixed(2));
@@ -492,6 +497,11 @@ function analyzeSvgLayers(svgContent, options = {}) {
       bbox: { minX: bucket.minX, minY: bucket.minY, maxX: bucket.maxX, maxY: bucket.maxY, width: w, height: h, bboxArea },
       paths: bucket.paths
     };
+  });
+
+  const totalCalculatedHeight = cumulativeZ || 10.00;
+  assigned.forEach(l => {
+    l.heightPct = parseFloat(((l.thicknessMm / totalCalculatedHeight) * 100).toFixed(1));
   });
 
   // Identify similar colors that can be merged (RGB distance < 50)

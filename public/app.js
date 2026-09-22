@@ -566,12 +566,19 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!res.ok) throw new Error('Failed to analyze SVG layers');
       const analysis = await res.json();
       studioState.analysis = analysis;
-      studioState.layers = (analysis.layers || []).map(l => ({
-        ...l,
-        thicknessMm: l.thicknessMm !== undefined 
+      studioState.layers = (analysis.layers || []).map((l, i) => {
+        let t = l.thicknessMm !== undefined 
           ? l.thicknessMm 
-          : parseFloat(((l.heightPct / 100.0) * studioState.totalThicknessMm).toFixed(2))
-      }));
+          : parseFloat(((l.heightPct / 100.0) * studioState.totalThicknessMm).toFixed(2));
+        if (i > 0) {
+          t = Math.max(0.80, t);
+        }
+        return {
+          ...l,
+          thicknessMm: t
+        };
+      });
+      adjustBaseLayerForTotal();
       undoStack = [];
       redoStack = [];
       updateUndoRedoButtons();
@@ -695,10 +702,10 @@ document.addEventListener('DOMContentLoaded', () => {
       target.bbox.bboxArea = target.bbox.width * target.bbox.height;
     }
 
-    // Ensure target has healthy height
+    // Ensure target has healthy height (minimum 0.80 mm)
     if (target.role !== 'base') {
-      target.thicknessMm = Math.max(target.thicknessMm || 1.50, source.thicknessMm || 1.50);
-      target.heightPct = Math.max(target.heightPct || 15, source.heightPct || 15);
+      target.thicknessMm = Math.max(0.80, target.thicknessMm || 0.80, source.thicknessMm || 0.80);
+      target.heightPct = Math.max(target.heightPct || 10, source.heightPct || 10);
     }
 
     // Splice out source layer
@@ -706,7 +713,7 @@ document.addEventListener('DOMContentLoaded', () => {
     studioState.activeMergeIdx = null;
 
     reassignRoles();
-    updateTotalThicknessFromLayers();
+    adjustBaseLayerForTotal();
     renderLayersList();
     updateThreeGeometry();
     updateDimensionBadges();
@@ -744,10 +751,10 @@ document.addEventListener('DOMContentLoaded', () => {
     target.pathCount = target.paths.length;
 
     if (target.role !== 'base') {
-      const srcMms = selectedIndices.map(i => studioState.layers[i]?.thicknessMm || 0);
-      target.thicknessMm = Math.max(target.thicknessMm || 1.50, ...srcMms);
-      const srcPcts = selectedIndices.map(i => studioState.layers[i]?.heightPct || 0);
-      target.heightPct = Math.max(target.heightPct || 15, ...srcPcts);
+      const srcMms = selectedIndices.map(i => studioState.layers[i]?.thicknessMm || 0.80);
+      target.thicknessMm = Math.max(0.80, target.thicknessMm || 0.80, ...srcMms);
+      const srcPcts = selectedIndices.map(i => studioState.layers[i]?.heightPct || 10);
+      target.heightPct = Math.max(target.heightPct || 10, ...srcPcts);
     }
 
     // Remove source layers in descending index order so remaining indices don't shift
@@ -760,7 +767,7 @@ document.addEventListener('DOMContentLoaded', () => {
     studioState.activeMergeIdx = null;
 
     reassignRoles();
-    updateTotalThicknessFromLayers();
+    adjustBaseLayerForTotal();
     renderLayersList();
     updateThreeGeometry();
     updateDimensionBadges();
@@ -781,6 +788,7 @@ document.addEventListener('DOMContentLoaded', () => {
       studioState.layers.splice(idx, 1);
       studioState.activeMergeIdx = null;
       reassignRoles();
+      adjustBaseLayerForTotal();
       renderLayersList();
       updateThreeGeometry();
       updateDimensionBadges();
@@ -809,20 +817,61 @@ document.addEventListener('DOMContentLoaded', () => {
 
   inputTotalThickness.addEventListener('input', (e) => {
     const val = parseFloat(e.target.value);
-    if (val > 0) {
-      const oldTotal = studioState.totalThicknessMm || 10.0;
-      const ratio = val / oldTotal;
+    if (val >= 1.0) {
       studioState.totalThicknessMm = val;
-      studioState.layers.forEach(l => {
-        if (l.thicknessMm !== undefined) {
-          l.thicknessMm = parseFloat((l.thicknessMm * ratio).toFixed(2));
-        }
-      });
-      updateDimensionBadges();
+      adjustBaseLayerForTotal();
       renderLayersList();
       updateThreeGeometry();
     }
   });
+
+  function adjustBaseLayerForTotal() {
+    if (!studioState.layers || studioState.layers.length === 0) return;
+
+    if (studioState.layers.length === 1) {
+      studioState.layers[0].thicknessMm = studioState.totalThicknessMm || 10.00;
+      studioState.layers[0].heightPct = 100;
+      updateDimensionBadges();
+      return;
+    }
+
+    // Enforce minimum 0.80 mm on all color layers (index > 0)
+    let upperSum = 0;
+    for (let i = 1; i < studioState.layers.length; i++) {
+      const l = studioState.layers[i];
+      let thick = parseFloat(l.thicknessMm);
+      if (isNaN(thick) || thick < 0.80) {
+        thick = 0.80;
+      }
+      thick = parseFloat(thick.toFixed(2));
+      l.thicknessMm = thick;
+      upperSum += thick;
+    }
+    upperSum = parseFloat(upperSum.toFixed(2));
+
+    const targetTotal = parseFloat((studioState.totalThicknessMm || 10.00).toFixed(2));
+    const remainingBase = parseFloat((targetTotal - upperSum).toFixed(2));
+
+    if (remainingBase >= 0.80) {
+      // Base layer absorbs the remainder to make total exactly targetTotal (10.00 mm)
+      studioState.layers[0].thicknessMm = remainingBase;
+      studioState.totalThicknessMm = targetTotal;
+    } else {
+      // If color layers exceed 9.20 mm, ensure base has at least 0.80 mm and adjust total
+      studioState.layers[0].thicknessMm = 0.80;
+      studioState.totalThicknessMm = parseFloat((upperSum + 0.80).toFixed(2));
+    }
+
+    const finalTotal = studioState.totalThicknessMm;
+    studioState.layers.forEach(l => {
+      l.heightPct = parseFloat(((l.thicknessMm / finalTotal) * 100).toFixed(1));
+    });
+
+    if (inputTotalThickness) {
+      inputTotalThickness.value = studioState.totalThicknessMm.toFixed(1);
+    }
+    updateDimensionBadges();
+  }
 
   function updateTotalThicknessFromLayers() {
     if (!studioState.layers || studioState.layers.length === 0) return;
@@ -831,7 +880,7 @@ document.addEventListener('DOMContentLoaded', () => {
     );
     if (newTotal > 0) {
       studioState.totalThicknessMm = newTotal;
-      if (inputTotalThickness) inputTotalThickness.value = newTotal;
+      if (inputTotalThickness) inputTotalThickness.value = newTotal.toFixed(1);
     }
     updateDimensionBadges();
   }
@@ -872,7 +921,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Calculate thickness in mm
       if (layer.thicknessMm === undefined) {
-        layer.thicknessMm = (idx === 0) ? 7.00 : 1.00;
+        layer.thicknessMm = (idx === 0) ? 7.00 : 0.80;
+      } else if (idx > 0) {
+        layer.thicknessMm = Math.max(0.80, parseFloat(layer.thicknessMm || 0.80));
       }
       const thicknessMm = parseFloat(layer.thicknessMm).toFixed(2);
       const zStart = runningZ;
@@ -903,8 +954,8 @@ document.addEventListener('DOMContentLoaded', () => {
             </select>
           </div>
           <div class="layer-height-inputs">
-            <div class="layer-mm-box" title="Layer thickness in mm">
-              <input type="number" class="layer-height-mm-input" value="${thicknessMm}" min="0.05" max="50" step="0.05" data-idx="${idx}" />
+            <div class="layer-mm-box" title="${idx === 0 ? 'Base foundation thickness (auto-adjusts to total 10mm)' : 'Color layer thickness (minimum 0.8 mm)'}">
+              <input type="number" class="layer-height-mm-input" value="${thicknessMm}" min="0.8" max="50" step="0.1" data-idx="${idx}" />
               <span class="layer-unit-label">mm</span>
             </div>
             <span class="layer-z-range-badge" title="Print height range along Z axis">Z: ${zStart.toFixed(2)} – ${zEnd.toFixed(2)} mm</span>
@@ -1014,17 +1065,23 @@ document.addEventListener('DOMContentLoaded', () => {
       const mmInput = row.querySelector('.layer-height-mm-input');
       if (mmInput) {
         mmInput.addEventListener('change', (e) => {
-          const val = parseFloat(e.target.value);
-          if (val > 0) {
-            saveUndoState();
-            studioState.layers[idx].thicknessMm = val;
+          let val = parseFloat(e.target.value);
+          if (isNaN(val)) return;
+          saveUndoState();
+          if (idx > 0) {
+            // Any color layer: minimum 0.80 mm
+            val = Math.max(0.80, val);
+            studioState.layers[idx].thicknessMm = parseFloat(val.toFixed(2));
+            // Adjust base layer accordingly to keep total fully 10.0 mm
+            adjustBaseLayerForTotal();
+          } else {
+            // Base layer: minimum 0.80 mm
+            val = Math.max(0.80, val);
+            studioState.layers[0].thicknessMm = parseFloat(val.toFixed(2));
             updateTotalThicknessFromLayers();
-            studioState.layers.forEach(l => {
-              l.heightPct = parseFloat(((l.thicknessMm / studioState.totalThicknessMm) * 100).toFixed(1));
-            });
-            renderLayersList();
-            updateThreeGeometry();
           }
+          renderLayersList();
+          updateThreeGeometry();
         });
       }
 
@@ -1120,30 +1177,25 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!studioState.layers[0].role) {
       studioState.layers[0].role = 'base';
     }
-    if (studioState.layers[0].role === 'base') {
-      if (studioState.layers[0].thicknessMm === undefined) {
-        studioState.layers[0].thicknessMm = (total === 1) ? 10.00 : 7.00;
-      }
-      if (!studioState.layers[0].heightPct) {
-        studioState.layers[0].heightPct = (total === 1) ? 100 : 70;
-      }
-    }
 
-    // Preserve all other existing roles and names
+    const upperCount = Math.max(1, total - 1);
+    const defaultColorMm = Math.max(0.80, Math.min(1.50, parseFloat((3.00 / upperCount).toFixed(2))));
+
+    // Set roles and ensure min 0.80 mm for all upper layers
     studioState.layers.forEach((l, i) => {
       if (i > 0) {
         if (!l.role) {
           l.role = (i === total - 1) ? 'top' : 'mid';
         }
         if (l.thicknessMm === undefined) {
-          const upperCount = Math.max(1, total - 1);
-          l.thicknessMm = parseFloat((3.00 / upperCount).toFixed(2));
-        }
-        if (!l.heightPct) {
-          l.heightPct = parseFloat(((l.thicknessMm / 10.00) * 100).toFixed(1));
+          l.thicknessMm = defaultColorMm;
+        } else {
+          l.thicknessMm = Math.max(0.80, parseFloat(l.thicknessMm || 0.80));
         }
       }
     });
+
+    adjustBaseLayerForTotal();
   }
 
   // ==================== THREE.JS 3D VIEWPORT ENGINE ====================
@@ -1276,12 +1328,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const totalThick_mm = studioState.totalThicknessMm;
 
     const baseLayer = studioState.layers.find(l => l.role === 'base') || studioState.layers[0];
-    const baseThickness = Math.max(0.2, (baseLayer && baseLayer.thicknessMm !== undefined) ? baseLayer.thicknessMm : 7.00);
+    const baseThickness = Math.max(0.80, (baseLayer && baseLayer.thicknessMm !== undefined) ? baseLayer.thicknessMm : (studioState.layers[0]?.thicknessMm || 7.00));
 
     let currentCumulativeTop = baseThickness;
     studioState.layers.forEach((layer, idx) => {
       const isBase = (layer.role === 'base' || idx === 0);
-      const layerStepThick = Math.max(0.1, layer.thicknessMm !== undefined ? layer.thicknessMm : 1.0);
+      const layerStepThick = isBase 
+        ? baseThickness 
+        : Math.max(0.80, layer.thicknessMm !== undefined ? layer.thicknessMm : 0.80);
 
       let ownZStart = 0;
       let ownExtrudeDepth = baseThickness;
@@ -1293,7 +1347,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentCumulativeTop += layerStepThick;
         // Extrude from base foundation up to this layer's top height so it is solidly supported without floating
         ownZStart = baseThickness;
-        ownExtrudeDepth = Math.max(0.1, currentCumulativeTop - baseThickness);
+        ownExtrudeDepth = Math.max(0.80, currentCumulativeTop - baseThickness);
       }
 
       const layerGroup = new THREE.Group();
@@ -1652,8 +1706,8 @@ ${buildXml}  </build>
 
       const jobName = (studioState.jobName || 'Nameplate').replace(/[^a-zA-Z0-9_-]/g, '_');
       const fixedWidthMm = studioState.fixedWidthMm || 150.0;
-      const totalThicknessMm = studioState.totalThicknessMm || 10.0;
-      const baseThickness = studioState.baseThicknessMm !== undefined ? studioState.baseThicknessMm : 7.0;
+      const baseLayer = studioState.layers.find(l => l.role === 'base') || studioState.layers[0];
+      const baseThickness = Math.max(0.80, (baseLayer && baseLayer.thicknessMm !== undefined) ? baseLayer.thicknessMm : (studioState.layers[0]?.thicknessMm || 7.00));
 
       // Extract triangles for each layer
       const layerPrintSpecs = [];
@@ -1661,7 +1715,9 @@ ${buildXml}  </build>
 
       studioState.layers.forEach((layer, idx) => {
         const isBase = (layer.role === 'base' || idx === 0);
-        const thickMm = parseFloat(layer.thicknessMm !== undefined ? layer.thicknessMm : 1.0);
+        const thickMm = isBase 
+          ? baseThickness 
+          : Math.max(0.80, parseFloat(layer.thicknessMm !== undefined ? layer.thicknessMm : 0.80));
         const group = threeLayerMeshes[idx];
         const triangles = group ? extractTrianglesFromObject(group) : [];
 
@@ -1861,7 +1917,8 @@ ${buildXml}  </build>
     }
 
     const jobName = (studioState.jobName || 'Nameplate').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const baseThick = studioState.baseThicknessMm !== undefined ? studioState.baseThicknessMm : 7.0;
+    const baseLayer = studioState.layers.find(l => l.role === 'base') || studioState.layers[0];
+    const baseThick = Math.max(0.80, (baseLayer && baseLayer.thicknessMm !== undefined) ? baseLayer.thicknessMm : (studioState.layers[0]?.thicknessMm || 7.00));
     let guide = `============================================================\n`;
     guide += `  FDM 3D PRINTING GUIDE: ${jobName}\n`;
     guide += `============================================================\n\n`;
@@ -1882,7 +1939,9 @@ ${buildXml}  </build>
     let cumZ = baseThick;
     studioState.layers.forEach((lyr, i) => {
       const isB = (i === 0 || lyr.role === 'base');
-      const t = parseFloat(lyr.thicknessMm !== undefined ? lyr.thicknessMm : 1.0);
+      const t = isB 
+        ? baseThick 
+        : Math.max(0.80, parseFloat(lyr.thicknessMm !== undefined ? lyr.thicknessMm : 0.80));
       let pStart = 0, pEnd = baseThick;
       if (isB) {
         pStart = 0; pEnd = baseThick;
