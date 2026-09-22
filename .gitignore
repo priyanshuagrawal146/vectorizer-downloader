@@ -1,3 +1,19 @@
 node_modules/
 .DS_Store
 *.log
+
+# 3D generated job folders and outputs
+jobs/
+output/
+__pycache__/
+
+# Scratch scripts and test artifacts
+check_*.py
+inspect_*.py
+render_*.py
+test_*
+karate_final_*.png
+layer_list_crop.png
+wb_*.png
+verify_*.png
+render_*.png
