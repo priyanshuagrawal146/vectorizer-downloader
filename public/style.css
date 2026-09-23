@@ -2014,3 +2014,143 @@ body {
   background: rgba(0, 0, 0, 0.2);
 }
 
+/* ==================== COMBINE & COLOR INSPECTION STYLES ==================== */
+.btn-accent-sm {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: linear-gradient(135deg, #a855f7, #6366f1);
+  color: #fff;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-accent-sm:hover {
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.5);
+  filter: brightness(1.15);
+}
+
+.btn-layer-tool.btn-combine:hover {
+  background: rgba(168, 85, 247, 0.2);
+  border-color: rgba(168, 85, 247, 0.5);
+  color: #c084fc;
+}
+
+.btn-layer-tool.btn-combine-active {
+  background: #a855f7;
+  color: #fff;
+  border-color: #a855f7;
+  box-shadow: 0 0 8px rgba(168, 85, 247, 0.5);
+}
+
+.combine-confirm-btn {
+  padding: 0.25rem 0.6rem;
+  background: linear-gradient(135deg, #a855f7, #7c3aed);
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: filter 0.15s;
+  white-space: nowrap;
+}
+
+.combine-confirm-btn:hover {
+  filter: brightness(1.2);
+  box-shadow: 0 0 8px rgba(168, 85, 247, 0.4);
+}
+
+.badge-combine {
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Layer Row Highlight & Active Inspection */
+.layer-row-item {
+  cursor: pointer;
+}
+
+.layer-row-item.layer-row-inspected {
+  border-color: #38bdf8 !important;
+  background: rgba(56, 189, 248, 0.12) !important;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.25) !important;
+}
+
+.layer-row-item.layer-row-hovered:not(.layer-row-inspected) {
+  border-color: rgba(56, 189, 248, 0.5);
+  background: rgba(56, 189, 248, 0.06);
+}
+
+/* 3D Viewport Color Inspection HUD */
+.three-viewport-box {
+  position: relative;
+}
+
+.layer-inspect-hud {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.45rem 0.95rem;
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  border-radius: 20px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4), 0 0 14px rgba(56, 189, 248, 0.25);
+  z-index: 25;
+  pointer-events: auto;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.inspect-hud-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.4);
+  flex-shrink: 0;
+}
+
+.inspect-hud-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.inspect-hud-stats {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.btn-inspect-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+.btn-inspect-close:hover {
+  color: #f87171;
+}
+

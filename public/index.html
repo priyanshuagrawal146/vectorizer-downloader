@@ -380,9 +380,10 @@
               <span id="selectedLayersBadge" class="badge badge-accent">2 Layers Selected</span>
             </div>
             <div class="multi-merge-actions">
-              <span class="merge-into-label">Merge into:</span>
+              <span class="merge-into-label">Into:</span>
               <select id="multiMergeTargetSelect" class="multi-merge-select"></select>
-              <button id="btnConfirmMultiMerge" class="btn-tool btn-primary-sm" type="button">Merge Selected</button>
+              <button id="btnConfirmMultiMerge" class="btn-tool btn-primary-sm" type="button" title="Fuse selected layers into solid fill (Weld)">Merge (Weld)</button>
+              <button id="btnConfirmMultiCombine" class="btn-tool btn-accent-sm" type="button" title="Combine selected layers and cut out overlapping areas into hollow holes (CorelDRAW Combine)">⧉ Combine (Hollow)</button>
               <button id="btnCancelMultiSelect" class="btn-tool btn-cancel-sm" type="button" title="Clear selection">✕</button>
             </div>
           </div>
@@ -537,6 +538,14 @@
             <div id="threeLoadingOverlay" class="three-loading hidden">
               <div class="spinner-lg"></div>
               <span>Extruding 3D Geometry...</span>
+            </div>
+
+            <!-- Interactive Color Selection & Inspection HUD -->
+            <div id="layerInspectHud" class="layer-inspect-hud hidden">
+              <span class="inspect-hud-dot" id="inspectHudColor"></span>
+              <span class="inspect-hud-title" id="inspectHudTitle">Layer 1</span>
+              <span class="inspect-hud-stats" id="inspectHudStats">12 paths • 1.50mm</span>
+              <button id="btnDismissInspect" class="btn-inspect-close" type="button" title="Clear highlight">✕</button>
             </div>
           </div>
 

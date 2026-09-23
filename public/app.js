@@ -390,12 +390,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const dismissGuideModal = document.getElementById('dismissGuideModal');
   const copyGuideTextBtn = document.getElementById('copyGuideTextBtn');
 
-  // Multi-merge toolbar elements
+  // Multi-merge & combine toolbar elements
   const multiMergeBar = document.getElementById('multiMergeBar');
   const selectedLayersBadge = document.getElementById('selectedLayersBadge');
   const multiMergeTargetSelect = document.getElementById('multiMergeTargetSelect');
   const btnConfirmMultiMerge = document.getElementById('btnConfirmMultiMerge');
+  const btnConfirmMultiCombine = document.getElementById('btnConfirmMultiCombine');
   const btnCancelMultiSelect = document.getElementById('btnCancelMultiSelect');
+
+  // 3D Viewport Inspection HUD
+  const layerInspectHud = document.getElementById('layerInspectHud');
+  const inspectHudColor = document.getElementById('inspectHudColor');
+  const inspectHudTitle = document.getElementById('inspectHudTitle');
+  const inspectHudStats = document.getElementById('inspectHudStats');
+  const btnDismissInspect = document.getElementById('btnDismissInspect');
 
   // Studio State
   let studioState = {
@@ -411,6 +419,8 @@ document.addEventListener('DOMContentLoaded', () => {
     wireframe3d: false,
     lastExportResult: null,
     activeMergeIdx: null,
+    activeCombineIdx: null,
+    inspectedLayerIdx: null,
     selectedLayerIndices: new Set(),
     raisedTextDetected: false  // true when hole-paths were successfully raised as 3D text
   };
@@ -776,6 +786,106 @@ document.addEventListener('DOMContentLoaded', () => {
     updateSimilarColorMergeBtn(remainingPairs);
   }
 
+  // Combine 2 Layers (CorelDRAW Style: Hollow / Cutout overlapping areas using evenodd compound path)
+  function combineLayers(sourceIdx, targetIdx) {
+    if (sourceIdx === targetIdx || !studioState.layers[sourceIdx] || !studioState.layers[targetIdx]) return;
+    saveUndoState();
+
+    const source = studioState.layers[sourceIdx];
+    const target = studioState.layers[targetIdx];
+
+    // Combine paths into target with evenodd fill rule (punches out overlapping areas as holes)
+    target.paths = [...target.paths, ...source.paths];
+    target.pathCount = target.paths.length;
+    target.fillRule = 'evenodd';
+    target.isCombined = true;
+
+    // Combine bounding boxes
+    if (source.bbox && target.bbox) {
+      target.bbox.minX = Math.min(target.bbox.minX, source.bbox.minX);
+      target.bbox.maxX = Math.max(target.bbox.maxX, source.bbox.maxX);
+      target.bbox.minY = Math.min(target.bbox.minY, source.bbox.minY);
+      target.bbox.maxY = Math.max(target.bbox.maxY, source.bbox.maxY);
+      target.bbox.width = Math.max(0, target.bbox.maxX - target.bbox.minX);
+      target.bbox.height = Math.max(0, target.bbox.maxY - target.bbox.minY);
+      target.bbox.bboxArea = target.bbox.width * target.bbox.height;
+    }
+
+    if (target.role !== 'base') {
+      target.thicknessMm = Math.max(0.80, target.thicknessMm || 0.80, source.thicknessMm || 0.80);
+      target.heightPct = Math.max(target.heightPct || 10, source.heightPct || 10);
+    }
+
+    // Splice out source layer
+    studioState.layers.splice(sourceIdx, 1);
+    studioState.activeMergeIdx = null;
+    studioState.activeCombineIdx = null;
+
+    reassignRoles();
+    adjustBaseLayerForTotal();
+    renderLayersList();
+    updateThreeGeometry();
+    updateDimensionBadges();
+
+    const remainingPairs = findSimilarColorPairs();
+    updateSimilarColorMergeBtn(remainingPairs);
+  }
+
+  // Combine Multiple Selected Layers into Target Layer (CorelDRAW Style)
+  function combineMultipleLayers(selectedIndices, targetIdx) {
+    if (!selectedIndices || selectedIndices.length < 2 || !studioState.layers[targetIdx]) return;
+    saveUndoState();
+
+    const target = studioState.layers[targetIdx];
+
+    selectedIndices.forEach(srcIdx => {
+      if (srcIdx === targetIdx) return;
+      const source = studioState.layers[srcIdx];
+      if (!source) return;
+
+      target.paths = [...target.paths, ...source.paths];
+
+      if (source.bbox && target.bbox) {
+        target.bbox.minX = Math.min(target.bbox.minX, source.bbox.minX);
+        target.bbox.maxX = Math.max(target.bbox.maxX, source.bbox.maxX);
+        target.bbox.minY = Math.min(target.bbox.minY, source.bbox.minY);
+        target.bbox.maxY = Math.max(target.bbox.maxY, source.bbox.maxY);
+        target.bbox.width = Math.max(0, target.bbox.maxX - target.bbox.minX);
+        target.bbox.height = Math.max(0, target.bbox.maxY - target.bbox.minY);
+        target.bbox.bboxArea = target.bbox.width * target.bbox.height;
+      }
+    });
+
+    target.pathCount = target.paths.length;
+    target.fillRule = 'evenodd';
+    target.isCombined = true;
+
+    if (target.role !== 'base') {
+      const srcMms = selectedIndices.map(i => studioState.layers[i]?.thicknessMm || 0.80);
+      target.thicknessMm = Math.max(0.80, target.thicknessMm || 0.80, ...srcMms);
+      const srcPcts = selectedIndices.map(i => studioState.layers[i]?.heightPct || 10);
+      target.heightPct = Math.max(target.heightPct || 10, ...srcPcts);
+    }
+
+    const toRemove = selectedIndices.filter(i => i !== targetIdx).sort((a, b) => b - a);
+    toRemove.forEach(idx => {
+      studioState.layers.splice(idx, 1);
+    });
+
+    studioState.selectedLayerIndices.clear();
+    studioState.activeMergeIdx = null;
+    studioState.activeCombineIdx = null;
+
+    reassignRoles();
+    adjustBaseLayerForTotal();
+    renderLayersList();
+    updateThreeGeometry();
+    updateDimensionBadges();
+
+    const remainingPairs = findSimilarColorPairs();
+    updateSimilarColorMergeBtn(remainingPairs);
+  }
+
   // Delete Layer
   function deleteLayer(idx) {
     if (studioState.layers.length <= 1) {
@@ -914,8 +1024,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let runningZ = 0;
     studioState.layers.forEach((layer, idx) => {
       const isSelected = studioState.selectedLayerIndices.has(idx);
+      const isInspected = (studioState.inspectedLayerIdx === idx);
       const row = document.createElement('div');
-      row.className = `layer-row-item ${isSelected ? 'layer-row-selected' : ''}`;
+      row.className = `layer-row-item ${isSelected ? 'layer-row-selected' : ''} ${isInspected ? 'layer-row-inspected' : ''}`;
+      row.dataset.idx = idx;
 
       const roleClass = layer.role === 'base' ? 'role-base' : (layer.role === 'top' ? 'role-top' : 'role-mid');
 
@@ -933,20 +1045,23 @@ document.addEventListener('DOMContentLoaded', () => {
       layer.zEndMm = zEnd;
 
       const isMergeOpen = (studioState.activeMergeIdx === idx);
+      const isCombineOpen = (studioState.activeCombineIdx === idx);
+      const isPopoverOpen = isMergeOpen || isCombineOpen;
 
       const colorHexVal = (layer.color && layer.color.startsWith('#') && layer.color.length === 7) ? layer.color : '#ffffff';
 
       row.innerHTML = `
-        <label class="layer-checkbox-container" title="Select to merge">
+        <label class="layer-checkbox-container" title="Select to merge or combine">
           <input type="checkbox" class="layer-select-checkbox" data-idx="${idx}" ${isSelected ? 'checked' : ''} />
         </label>
         <div class="layer-order-num">${idx + 1}</div>
-        <label class="layer-color-preview" style="background-color: ${layer.color}" title="Click to customize color">
+        <label class="layer-color-preview" style="background-color: ${layer.color}" title="Click to edit color or hover to highlight in 3D">
           <input type="color" class="layer-color-picker" value="${colorHexVal}" style="opacity:0;position:absolute;pointer-events:none;" />
         </label>
         <div class="layer-main-info">
           <div class="layer-name-row">
             <input type="text" class="layer-name-input" value="${layer.name}" data-idx="${idx}" />
+            ${layer.isCombined ? '<span class="badge badge-combine" title="Combined layer with hollow cutouts for overlapping shapes">⧉ Combined</span>' : ''}
             <select class="layer-role-select ${roleClass}" data-idx="${idx}" title="Set Extrusion Role">
               <option value="base" ${layer.role === 'base' ? 'selected' : ''}>Base (Foundation)</option>
               <option value="mid" ${layer.role === 'mid' ? 'selected' : ''}>Mid (Artwork / Details)</option>
@@ -963,7 +1078,8 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
         <div class="layer-tools-group">
-          <button class="btn-layer-tool btn-merge ${isMergeOpen ? 'btn-merge-active' : ''}" data-idx="${idx}" title="Merge into another layer" type="button">⇄</button>
+          <button class="btn-layer-tool btn-merge ${isMergeOpen ? 'btn-merge-active' : ''}" data-idx="${idx}" title="Merge into another layer (Solid Union)" type="button">⇄</button>
+          <button class="btn-layer-tool btn-combine ${isCombineOpen ? 'btn-combine-active' : ''}" data-idx="${idx}" title="Combine into another layer (Hollow / Cutout overlap)" type="button">⧉</button>
           <button class="btn-layer-tool btn-delete" data-idx="${idx}" title="Delete layer" type="button">🗑️</button>
         </div>
         <div class="layer-reorder-btns">
@@ -972,8 +1088,8 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       `;
 
-      // If merge popover is active for this row
-      if (isMergeOpen) {
+      // If merge or combine popover is active for this row
+      if (isPopoverOpen) {
         const popover = document.createElement('div');
         popover.className = 'merge-popover';
         let optionsHtml = '';
@@ -984,9 +1100,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         popover.innerHTML = `
-          <span>Merge with:</span>
+          <span>${isCombineOpen ? 'Combine with:' : 'Merge with:'}</span>
           <select class="merge-select">${optionsHtml}</select>
-          <button class="merge-confirm-btn" type="button">Merge</button>
+          <button class="merge-confirm-btn" type="button" title="Fuse into solid shapes">Merge (Weld)</button>
+          <button class="combine-confirm-btn" type="button" title="Punches out overlapping areas into hollow holes">⧉ Combine (Hole)</button>
           <button class="merge-cancel-btn" type="button">✕</button>
         `;
 
@@ -999,14 +1116,53 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         });
 
+        popover.querySelector('.combine-confirm-btn').addEventListener('click', (e) => {
+          e.stopPropagation();
+          const sel = popover.querySelector('.merge-select');
+          if (sel) {
+            const targetIdx = parseInt(sel.value, 10);
+            combineLayers(idx, targetIdx);
+          }
+        });
+
         popover.querySelector('.merge-cancel-btn').addEventListener('click', (e) => {
           e.stopPropagation();
           studioState.activeMergeIdx = null;
+          studioState.activeCombineIdx = null;
           renderLayersList();
         });
 
         row.appendChild(popover);
       }
+
+      // Hover highlight in 3D viewport
+      row.addEventListener('mouseenter', () => {
+        row.classList.add('layer-row-hovered');
+        highlightLayerIn3D(idx);
+      });
+      row.addEventListener('mouseleave', () => {
+        row.classList.remove('layer-row-hovered');
+        if (studioState.inspectedLayerIdx !== null) {
+          highlightLayerIn3D(studioState.inspectedLayerIdx);
+        } else {
+          highlightLayerIn3D(null);
+        }
+      });
+
+      // Click row to lock/toggle inspection
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('input') || e.target.closest('select') || e.target.closest('button') || e.target.closest('.merge-popover')) {
+          return;
+        }
+        if (studioState.inspectedLayerIdx === idx) {
+          studioState.inspectedLayerIdx = null;
+          highlightLayerIn3D(null);
+        } else {
+          studioState.inspectedLayerIdx = idx;
+          highlightLayerIn3D(idx);
+        }
+        updateLayerInspectionUI();
+      });
 
       // Role selector change
       const roleSel = row.querySelector('.layer-role-select');
@@ -1023,29 +1179,63 @@ document.addEventListener('DOMContentLoaded', () => {
       const colorLabel = row.querySelector('.layer-color-preview');
       const colorPicker = row.querySelector('.layer-color-picker');
       if (colorLabel && colorPicker) {
-        colorLabel.addEventListener('click', () => colorPicker.click());
+        colorLabel.addEventListener('mouseenter', () => {
+          highlightLayerIn3D(idx);
+        });
+        colorLabel.addEventListener('mouseleave', () => {
+          if (studioState.inspectedLayerIdx !== null) {
+            highlightLayerIn3D(studioState.inspectedLayerIdx);
+          } else {
+            highlightLayerIn3D(null);
+          }
+        });
+        colorLabel.addEventListener('click', (e) => {
+          e.stopPropagation();
+          studioState.inspectedLayerIdx = idx;
+          highlightLayerIn3D(idx);
+          updateLayerInspectionUI();
+          colorPicker.click();
+        });
         colorPicker.addEventListener('input', (e) => {
           const newCol = e.target.value;
           studioState.layers[idx].color = newCol;
           colorLabel.style.backgroundColor = newCol;
+          if (inspectHudColor) inspectHudColor.style.backgroundColor = newCol;
           updateThreeGeometry();
+          highlightLayerIn3D(idx);
         });
         colorPicker.addEventListener('change', (e) => {
           saveUndoState();
           const newCol = e.target.value;
           studioState.layers[idx].color = newCol;
           colorLabel.style.backgroundColor = newCol;
+          if (inspectHudColor) inspectHudColor.style.backgroundColor = newCol;
           updateThreeGeometry();
+          highlightLayerIn3D(idx);
         });
       }
 
       // Merge button toggle
       const mergeBtn = row.querySelector('.btn-merge');
-      mergeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        studioState.activeMergeIdx = (studioState.activeMergeIdx === idx) ? null : idx;
-        renderLayersList();
-      });
+      if (mergeBtn) {
+        mergeBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          studioState.activeCombineIdx = null;
+          studioState.activeMergeIdx = (studioState.activeMergeIdx === idx) ? null : idx;
+          renderLayersList();
+        });
+      }
+
+      // Combine button toggle
+      const combineBtn = row.querySelector('.btn-combine');
+      if (combineBtn) {
+        combineBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          studioState.activeMergeIdx = null;
+          studioState.activeCombineIdx = (studioState.activeCombineIdx === idx) ? null : idx;
+          renderLayersList();
+        });
+      }
 
       // Delete button
       const deleteBtn = row.querySelector('.btn-delete');
@@ -1155,12 +1345,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Multi-merge buttons
+  // Multi-merge & combine buttons
   btnConfirmMultiMerge?.addEventListener('click', () => {
     const selected = Array.from(studioState.selectedLayerIndices);
     const targetIdx = parseInt(multiMergeTargetSelect?.value, 10);
     if (!isNaN(targetIdx) && selected.length >= 2) {
       mergeMultipleLayers(selected, targetIdx);
+    }
+  });
+
+  btnConfirmMultiCombine?.addEventListener('click', () => {
+    const selected = Array.from(studioState.selectedLayerIndices);
+    const targetIdx = parseInt(multiMergeTargetSelect?.value, 10);
+    if (!isNaN(targetIdx) && selected.length >= 2) {
+      combineMultipleLayers(selected, targetIdx);
     }
   });
 
@@ -1249,6 +1447,56 @@ document.addEventListener('DOMContentLoaded', () => {
       threeRootGroup = new THREE.Group();
       threeScene.add(threeRootGroup);
 
+      // 3D Canvas click to inspect/highlight layer
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2();
+      let pointerDownPos = { x: 0, y: 0 };
+
+      threeRenderer.domElement.addEventListener('pointerdown', (e) => {
+        pointerDownPos = { x: e.clientX, y: e.clientY };
+      });
+
+      threeRenderer.domElement.addEventListener('pointerup', (e) => {
+        // Ensure user was clicking, not orbiting or panning
+        const dx = Math.abs(e.clientX - pointerDownPos.x);
+        const dy = Math.abs(e.clientY - pointerDownPos.y);
+        if (dx > 5 || dy > 5) return;
+
+        const rect = threeRenderer.domElement.getBoundingClientRect();
+        mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(mouse, threeCamera);
+
+        const allMeshes = [];
+        threeLayerMeshes.forEach(g => {
+          if (g) allMeshes.push(...g.children);
+        });
+
+        const intersects = raycaster.intersectObjects(allMeshes);
+        if (intersects.length > 0) {
+          const hitMesh = intersects[0].object;
+          const layerIdx = hitMesh.parent?.userData?.layerIndex;
+          if (layerIdx !== undefined && layerIdx !== null) {
+            studioState.inspectedLayerIdx = (studioState.inspectedLayerIdx === layerIdx) ? null : layerIdx;
+            highlightLayerIn3D(studioState.inspectedLayerIdx);
+            updateLayerInspectionUI();
+            if (studioState.inspectedLayerIdx !== null) {
+              const targetRow = layersContainer.children[layerIdx];
+              if (targetRow) {
+                targetRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              }
+            }
+          }
+        } else {
+          // Clicked empty background
+          if (studioState.inspectedLayerIdx !== null) {
+            studioState.inspectedLayerIdx = null;
+            highlightLayerIn3D(null);
+            updateLayerInspectionUI();
+          }
+        }
+      });
+
       window.addEventListener('resize', onThreeResize);
       animateThree();
     }
@@ -1307,6 +1555,105 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.classList.add('active');
   }
 
+  // Dismiss Inspection button
+  btnDismissInspect?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    studioState.inspectedLayerIdx = null;
+    highlightLayerIn3D(null);
+    updateLayerInspectionUI();
+  });
+
+  // Update inspection HUD display
+  function updateInspectHud(targetIdx) {
+    if (!layerInspectHud) return;
+    if (targetIdx === null || targetIdx === undefined || !studioState.layers[targetIdx]) {
+      layerInspectHud.classList.add('hidden');
+      return;
+    }
+    const lyr = studioState.layers[targetIdx];
+    if (inspectHudColor) inspectHudColor.style.backgroundColor = lyr.color;
+    if (inspectHudTitle) {
+      inspectHudTitle.textContent = `${lyr.name || 'Layer ' + (targetIdx + 1)} (${lyr.color})`;
+    }
+    if (inspectHudStats) {
+      const pCount = lyr.paths ? lyr.paths.length : 0;
+      const thk = (lyr.thicknessMm || 0.8).toFixed(2);
+      const mode = lyr.isCombined ? '⧉ Combined (Hollow)' : (lyr.role === 'base' ? 'Base Plate' : 'Detail Layer');
+      inspectHudStats.textContent = `${pCount} shapes • ${thk}mm • ${mode}`;
+    }
+    layerInspectHud.classList.remove('hidden');
+  }
+
+  // Sync inspection highlight class on layer rows
+  function updateLayerInspectionUI() {
+    if (!layersContainer) return;
+    const rows = layersContainer.querySelectorAll('.layer-row-item');
+    rows.forEach((row, idx) => {
+      const rIdx = (row.dataset && row.dataset.idx !== undefined) ? parseInt(row.dataset.idx, 10) : idx;
+      if (rIdx === studioState.inspectedLayerIdx) {
+        row.classList.add('layer-row-inspected');
+      } else {
+        row.classList.remove('layer-row-inspected');
+      }
+    });
+    updateInspectHud(studioState.inspectedLayerIdx);
+  }
+
+  // 3D Viewport Area Highlight for selected color/layer
+  function highlightLayerIn3D(targetIdx) {
+    if (!threeLayerMeshes || threeLayerMeshes.length === 0) return;
+
+    if (targetIdx === null || targetIdx === undefined) {
+      // Reset all meshes to standard rendering
+      threeLayerMeshes.forEach(group => {
+        if (!group) return;
+        group.traverse(child => {
+          if (child.isMesh && child.material) {
+            child.material.transparent = false;
+            child.material.opacity = 1.0;
+            if (child.material.emissive) {
+              child.material.emissive.setHex(0x000000);
+              child.material.emissiveIntensity = 0.0;
+            }
+            child.material.needsUpdate = true;
+          }
+        });
+      });
+      if (layerInspectHud) layerInspectHud.classList.add('hidden');
+      return;
+    }
+
+    // Highlight target layer and dim all other layers
+    threeLayerMeshes.forEach((group, idx) => {
+      if (!group) return;
+      const isTarget = (idx === targetIdx);
+      group.traverse(child => {
+        if (child.isMesh && child.material) {
+          if (isTarget) {
+            // Target layer: fully opaque with high-contrast cyan glow pulse
+            child.material.transparent = false;
+            child.material.opacity = 1.0;
+            if (child.material.emissive) {
+              child.material.emissive.setHex(0x00e5ff);
+              child.material.emissiveIntensity = 0.85;
+            }
+          } else {
+            // Other layers: ghosted out (translucent) so user clearly sees where that color area is
+            child.material.transparent = true;
+            child.material.opacity = 0.22;
+            if (child.material.emissive) {
+              child.material.emissive.setHex(0x000000);
+              child.material.emissiveIntensity = 0.0;
+            }
+          }
+          child.material.needsUpdate = true;
+        }
+      });
+    });
+
+    updateInspectHud(targetIdx);
+  }
+
   // Update extruded 3D meshes in Three.js
   function updateThreeGeometry() {
     if (!studioState.analysis || !threeRootGroup) return;
@@ -1361,7 +1708,11 @@ document.addEventListener('DOMContentLoaded', () => {
       if (isBase) {
         // 1. Base Layer: extrude foundation plate from Z = 0 to baseThickness
         let basePathsHtml = '';
-        if (studioState.solidBase) {
+        if (layer.isCombined || layer.fillRule === 'evenodd') {
+          // Combined layer: join all subpaths into a single <path fill-rule="evenodd"> so SVGLoader detects holes
+          const compoundD = (layer.paths || []).join(' ');
+          basePathsHtml = `<path fill="${layer.color}" fill-rule="evenodd" d="${compoundD}" />`;
+        } else if (studioState.solidBase) {
           studioState.layers.forEach(l => {
             (l.paths || []).forEach(rawD => {
               basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
@@ -1379,7 +1730,9 @@ document.addEventListener('DOMContentLoaded', () => {
         baseSvgData.paths.forEach(svgPath => {
           const shapes = THREE.SVGLoader.createShapes(svgPath);
           shapes.forEach(shape => {
-            if (studioState.solidBase) shape.holes = []; // 100% solid backing plate
+            if (studioState.solidBase && !layer.isCombined && layer.fillRule !== 'evenodd') {
+              shape.holes = []; // 100% solid backing plate unless user intentionally combined cutouts
+            }
             const mat = new THREE.MeshStandardMaterial({
               color: new THREE.Color(matColor),
               roughness: 0.45, metalness: 0.05,
@@ -1399,9 +1752,15 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         // 2. Upper layers: anchored to base plate and extruded up to cumulative top height (no floating gaps)
         let ownPathsHtml = '';
-        (layer.paths || []).forEach(rawD => {
-          ownPathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
-        });
+        if (layer.isCombined || layer.fillRule === 'evenodd') {
+          // Combined layer: join all subpaths into a single <path fill-rule="evenodd"> so SVGLoader detects holes
+          const compoundD = (layer.paths || []).join(' ');
+          ownPathsHtml = `<path fill="${layer.color}" fill-rule="evenodd" d="${compoundD}" />`;
+        } else {
+          (layer.paths || []).forEach(rawD => {
+            ownPathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
+          });
+        }
 
         const ownSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
           <g fill="${layer.color}">${ownPathsHtml}</g>
@@ -1450,6 +1809,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Detect if any non-base layer has compound paths (inner M-subpaths = text/holes)
     // These will be exported as raised-text STL layers by blender_processor.py
+    const prevRaised = studioState.raisedTextDetected;
     studioState.raisedTextDetected = studioState.layers.some((lyr, lIdx) => {
       if (lIdx === 0 || lyr.role === 'base') return false;
       return (lyr.paths || []).some(rawD => (rawD.match(/[Mm][^Mm]+/g) || []).length > 1);
@@ -1468,8 +1828,19 @@ document.addEventListener('DOMContentLoaded', () => {
     threeControls.update();
 
     applyThreeExplode();
-    // Re-render layer panel so "White Text (Raised)" row is added/removed dynamically
-    renderLayersList();
+
+    // Re-render layer panel if raised text toggled
+    if (prevRaised !== studioState.raisedTextDetected) {
+      renderLayersList();
+    }
+
+    // Re-apply inspection highlight if active
+    if (studioState.inspectedLayerIdx !== null && studioState.inspectedLayerIdx < studioState.layers.length) {
+      highlightLayerIn3D(studioState.inspectedLayerIdx);
+    } else {
+      highlightLayerIn3D(null);
+    }
+
     showThreeLoading(false);
   }
 
