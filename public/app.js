@@ -799,22 +799,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (isTargetBase) {
       // Combining a color layer into the Base Layer:
-      // Punch out ONLY this specific color layer's paths from the solid base plate
+      // Punch out ONLY this specific color layer's paths from the base plate
       target.cutoutPaths = [...(target.cutoutPaths || []), ...(source.cutoutPaths || source.paths || [])];
       target.isCombined = true;
-      target.fillRule = 'evenodd';
     } else if (isSourceBase) {
       // Base layer was chosen as source; target absorbs cutouts
       source.cutoutPaths = [...(source.cutoutPaths || []), ...(target.cutoutPaths || target.paths || [])];
       source.isCombined = true;
-      source.fillRule = 'evenodd';
       studioState.layers[targetIdx] = source;
       studioState.layers[sourceIdx] = target;
     } else {
-      // Combining two upper layers (CorelDRAW compound path with evenodd intersection punch-out)
-      target.paths = [...target.paths, ...source.paths];
-      target.pathCount = target.paths.length;
-      target.fillRule = 'evenodd';
+      // Combining two upper layers: punch out source from target
+      target.cutoutPaths = [...(target.cutoutPaths || []), ...(source.cutoutPaths || source.paths || [])];
+      target.pathCount = target.paths ? target.paths.length : 0;
       target.isCombined = true;
 
       // Combine bounding boxes
@@ -867,25 +864,21 @@ document.addEventListener('DOMContentLoaded', () => {
       const source = studioState.layers[srcIdx];
       if (!source) return;
 
-      if (isTargetBase) {
-        // Punch out each selected color's paths from the solid base plate
-        target.cutoutPaths = [...(target.cutoutPaths || []), ...(source.cutoutPaths || source.paths || [])];
-      } else {
-        target.paths = [...target.paths, ...source.paths];
-        if (source.bbox && target.bbox) {
-          target.bbox.minX = Math.min(target.bbox.minX, source.bbox.minX);
-          target.bbox.maxX = Math.max(target.bbox.maxX, source.bbox.maxX);
-          target.bbox.minY = Math.min(target.bbox.minY, source.bbox.minY);
-          target.bbox.maxY = Math.max(target.bbox.maxY, source.bbox.maxY);
-          target.bbox.width = Math.max(0, target.bbox.maxX - target.bbox.minX);
-          target.bbox.height = Math.max(0, target.bbox.maxY - target.bbox.minY);
-          target.bbox.bboxArea = target.bbox.width * target.bbox.height;
-        }
+      // Punch out each selected layer's paths from the target layer
+      target.cutoutPaths = [...(target.cutoutPaths || []), ...(source.cutoutPaths || source.paths || [])];
+
+      if (source.bbox && target.bbox) {
+        target.bbox.minX = Math.min(target.bbox.minX, source.bbox.minX);
+        target.bbox.maxX = Math.max(target.bbox.maxX, source.bbox.maxX);
+        target.bbox.minY = Math.min(target.bbox.minY, source.bbox.minY);
+        target.bbox.maxY = Math.max(target.bbox.maxY, source.bbox.maxY);
+        target.bbox.width = Math.max(0, target.bbox.maxX - target.bbox.minX);
+        target.bbox.height = Math.max(0, target.bbox.maxY - target.bbox.minY);
+        target.bbox.bboxArea = target.bbox.width * target.bbox.height;
       }
     });
 
     target.pathCount = target.paths ? target.paths.length : 0;
-    target.fillRule = 'evenodd';
     target.isCombined = true;
 
     if (!isTargetBase) {
@@ -1754,30 +1747,17 @@ document.addEventListener('DOMContentLoaded', () => {
         </svg>`;
         const baseSvgData = loader.parse(baseSvgStr);
 
-        // If specific color layers were combined with the base layer, parse ONLY their cutout paths as holes
-        const cutoutHoles = [];
-        const cutoutIslands = [];
+        // If specific color layers were combined with the base layer, parse their cutout paths
+        const cutoutShapes = [];
         if (layer.cutoutPaths && layer.cutoutPaths.length > 0) {
           const cutoutSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
-            <g>${layer.cutoutPaths.map(d => `<path fill-rule="evenodd" d="${d}" />`).join('')}</g>
+            <g>${layer.cutoutPaths.map(d => `<path d="${d}" />`).join('')}</g>
           </svg>`;
           const cutoutSvgData = loader.parse(cutoutSvgStr);
           cutoutSvgData.paths.forEach(svgP => {
             const cShapes = THREE.SVGLoader.createShapes(svgP);
             cShapes.forEach(cs => {
-              const pts = cs.getPoints();
-              if (pts && pts.length >= 3) {
-                cutoutHoles.push(new THREE.Path(pts));
-              }
-              // If the cutout shape has inner holes (like 'O', 'A', 'P'), those inner holes are islands that remain solid!
-              if (cs.holes && cs.holes.length > 0) {
-                cs.holes.forEach(ch => {
-                  const hPts = ch.getPoints();
-                  if (hPts && hPts.length >= 3) {
-                    cutoutIslands.push(new THREE.Shape(hPts));
-                  }
-                });
-              }
+              cutoutShapes.push(cs);
             });
           });
         }
@@ -1786,21 +1766,23 @@ document.addEventListener('DOMContentLoaded', () => {
         baseSvgData.paths.forEach(svgPath => {
           const shapes = THREE.SVGLoader.createShapes(svgPath);
           shapes.forEach(shape => {
-            if (studioState.solidBase) {
-              shape.holes = []; // 100% solid backing plate (clears puzzle cutouts from other colors)
-            }
-            // Now add ONLY the intentionally combined cutout holes to the solid base plate!
-            if (cutoutHoles.length > 0) {
-              shape.holes.push(...cutoutHoles);
+            // Preserve shape.holes so pre-existing hollows (keychain holes, frame centers, letter counters) remain 100% hollow!
+            const shapePts = shape.getPoints();
+            if (shapePts && shapePts.length >= 3 && cutoutShapes.length > 0) {
+              const shapeBox = new THREE.Box2().setFromPoints(shapePts);
+              cutoutShapes.forEach(cs => {
+                const cutPts = cs.getPoints();
+                if (cutPts && cutPts.length >= 3) {
+                  const cutBox = new THREE.Box2().setFromPoints(cutPts);
+                  if (shapeBox.intersectsBox(cutBox)) {
+                    shape.holes.push(new THREE.Path(cutPts));
+                  }
+                }
+              });
             }
             allBaseShapes.push(shape);
           });
         });
-
-        // Add any solid islands from compound cutouts (e.g. counter inside 'O')
-        if (cutoutIslands.length > 0) {
-          allBaseShapes.push(...cutoutIslands);
-        }
 
         allBaseShapes.forEach(shape => {
           const mat = new THREE.MeshStandardMaterial({
@@ -1821,15 +1803,9 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         // 2. Upper layers: anchored to base plate and extruded up to cumulative top height (no floating gaps)
         let ownPathsHtml = '';
-        if (layer.isCombined || layer.fillRule === 'evenodd') {
-          // Combined layer: join all subpaths into a single <path fill-rule="evenodd"> so SVGLoader detects holes
-          const compoundD = (layer.paths || []).join(' ');
-          ownPathsHtml = `<path fill="${layer.color}" fill-rule="evenodd" d="${compoundD}" />`;
-        } else {
-          (layer.paths || []).forEach(rawD => {
-            ownPathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
-          });
-        }
+        (layer.paths || []).forEach(rawD => {
+          ownPathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
+        });
 
         const ownSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
           <g fill="${layer.color}">${ownPathsHtml}</g>
@@ -1837,24 +1813,57 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const ownSvgData = loader.parse(ownSvgStr);
 
+        // If this upper layer has cutoutPaths (combined with another layer):
+        const cutoutShapes = [];
+        if (layer.cutoutPaths && layer.cutoutPaths.length > 0) {
+          const cutoutSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
+            <g>${layer.cutoutPaths.map(d => `<path d="${d}" />`).join('')}</g>
+          </svg>`;
+          const cutoutSvgData = loader.parse(cutoutSvgStr);
+          cutoutSvgData.paths.forEach(svgP => {
+            const cShapes = THREE.SVGLoader.createShapes(svgP);
+            cShapes.forEach(cs => {
+              cutoutShapes.push(cs);
+            });
+          });
+        }
+
+        const allLayerShapes = [];
         ownSvgData.paths.forEach(svgPath => {
           const shapes = THREE.SVGLoader.createShapes(svgPath);
           shapes.forEach(shape => {
-            const mat = new THREE.MeshStandardMaterial({
-              color: new THREE.Color(matColor),
-              roughness: 0.45, metalness: 0.05,
-              wireframe: studioState.wireframe3d
-            });
-            const geom = new THREE.ExtrudeGeometry(shape, {
-              depth: ownExtrudeDepth,
-              bevelEnabled: true, bevelSegments: 1, steps: 1,
-              bevelSize: 0.15, bevelThickness: 0.15
-            });
-            const mesh = new THREE.Mesh(geom, mat);
-            mesh.position.z = ownZStart;
-            mesh.castShadow = true; mesh.receiveShadow = true;
-            layerGroup.add(mesh);
+            const shapePts = shape.getPoints();
+            if (shapePts && shapePts.length >= 3 && cutoutShapes.length > 0) {
+              const shapeBox = new THREE.Box2().setFromPoints(shapePts);
+              cutoutShapes.forEach(cs => {
+                const cutPts = cs.getPoints();
+                if (cutPts && cutPts.length >= 3) {
+                  const cutBox = new THREE.Box2().setFromPoints(cutPts);
+                  if (shapeBox.intersectsBox(cutBox)) {
+                    shape.holes.push(new THREE.Path(cutPts));
+                  }
+                }
+              });
+            }
+            allLayerShapes.push(shape);
           });
+        });
+
+        allLayerShapes.forEach(shape => {
+          const mat = new THREE.MeshStandardMaterial({
+            color: new THREE.Color(matColor),
+            roughness: 0.45, metalness: 0.05,
+            wireframe: studioState.wireframe3d
+          });
+          const geom = new THREE.ExtrudeGeometry(shape, {
+            depth: ownExtrudeDepth,
+            bevelEnabled: true, bevelSegments: 1, steps: 1,
+            bevelSize: 0.15, bevelThickness: 0.15
+          });
+          const mesh = new THREE.Mesh(geom, mat);
+          mesh.position.z = ownZStart;
+          mesh.castShadow = true; mesh.receiveShadow = true;
+          layerGroup.add(mesh);
         });
       }
 
