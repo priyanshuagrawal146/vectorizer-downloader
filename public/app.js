@@ -580,7 +580,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let t = l.thicknessMm !== undefined 
           ? l.thicknessMm 
           : parseFloat(((l.heightPct / 100.0) * studioState.totalThicknessMm).toFixed(2));
-        t = Math.max(5.00, t);
+        t = Math.max(1.00, t);
         return {
           ...l,
           thicknessMm: t
@@ -710,9 +710,9 @@ document.addEventListener('DOMContentLoaded', () => {
       target.bbox.bboxArea = target.bbox.width * target.bbox.height;
     }
 
-    // Ensure target has healthy height (minimum 5.00 mm)
+    // Ensure target has healthy height (minimum 1.00 mm)
     if (target.role !== 'base') {
-      target.thicknessMm = Math.max(5.00, target.thicknessMm || 5.00, source.thicknessMm || 5.00);
+      target.thicknessMm = Math.max(1.00, target.thicknessMm || 1.00, source.thicknessMm || 1.00);
       target.heightPct = Math.max(target.heightPct || 10, source.heightPct || 10);
     }
 
@@ -759,8 +759,8 @@ document.addEventListener('DOMContentLoaded', () => {
     target.pathCount = target.paths.length;
 
     if (target.role !== 'base') {
-      const srcMms = selectedIndices.map(i => studioState.layers[i]?.thicknessMm || 5.00);
-      target.thicknessMm = Math.max(5.00, target.thicknessMm || 5.00, ...srcMms);
+      const srcMms = selectedIndices.map(i => studioState.layers[i]?.thicknessMm || 1.00);
+      target.thicknessMm = Math.max(1.00, target.thicknessMm || 1.00, ...srcMms);
       const srcPcts = selectedIndices.map(i => studioState.layers[i]?.heightPct || 10);
       target.heightPct = Math.max(target.heightPct || 10, ...srcPcts);
     }
@@ -823,7 +823,7 @@ document.addEventListener('DOMContentLoaded', () => {
         target.bbox.bboxArea = target.bbox.width * target.bbox.height;
       }
 
-      target.thicknessMm = Math.max(5.00, target.thicknessMm || 5.00, source.thicknessMm || 5.00);
+      target.thicknessMm = Math.max(1.00, target.thicknessMm || 1.00, source.thicknessMm || 1.00);
       target.heightPct = Math.max(target.heightPct || 10, source.heightPct || 10);
     }
 
@@ -880,8 +880,8 @@ document.addEventListener('DOMContentLoaded', () => {
     target.isCombined = true;
 
     if (!isTargetBase) {
-      const srcMms = selectedIndices.map(i => studioState.layers[i]?.thicknessMm || 5.00);
-      target.thicknessMm = Math.max(5.00, target.thicknessMm || 5.00, ...srcMms);
+      const srcMms = selectedIndices.map(i => studioState.layers[i]?.thicknessMm || 1.00);
+      target.thicknessMm = Math.max(1.00, target.thicknessMm || 1.00, ...srcMms);
       const srcPcts = selectedIndices.map(i => studioState.layers[i]?.heightPct || 10);
       target.heightPct = Math.max(target.heightPct || 10, ...srcPcts);
     }
@@ -964,13 +964,13 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Enforce minimum 5.00 mm on all color layers (index > 0)
+    // Enforce minimum 1.00 mm on all color layers (index > 0)
     let upperSum = 0;
     for (let i = 1; i < studioState.layers.length; i++) {
       const l = studioState.layers[i];
       let thick = parseFloat(l.thicknessMm);
-      if (isNaN(thick) || thick < 5.00) {
-        thick = 5.00;
+      if (isNaN(thick) || thick < 1.00) {
+        thick = 1.00;
       }
       thick = parseFloat(thick.toFixed(2));
       l.thicknessMm = thick;
@@ -981,14 +981,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const targetTotal = parseFloat((studioState.totalThicknessMm || 10.00).toFixed(2));
     const remainingBase = parseFloat((targetTotal - upperSum).toFixed(2));
 
-    if (remainingBase >= 5.00) {
+    if (remainingBase >= 1.00) {
       // Base layer absorbs the remainder to make total exactly targetTotal
       studioState.layers[0].thicknessMm = remainingBase;
       studioState.totalThicknessMm = targetTotal;
     } else {
-      // If color layers leave less than 5.00 mm for base, ensure base has at least 5.00 mm and adjust total
-      studioState.layers[0].thicknessMm = 5.00;
-      studioState.totalThicknessMm = parseFloat((upperSum + 5.00).toFixed(2));
+      // If color layers leave less than 1.00 mm for base, ensure base has at least 1.00 mm and adjust total
+      studioState.layers[0].thicknessMm = 1.00;
+      studioState.totalThicknessMm = parseFloat((upperSum + 1.00).toFixed(2));
     }
 
     const finalTotal = studioState.totalThicknessMm;
@@ -1052,9 +1052,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Calculate thickness in mm
       if (layer.thicknessMm === undefined) {
-        layer.thicknessMm = 5.00;
+        layer.thicknessMm = (idx === 0) ? (studioState.layers.length > 1 ? Math.max(1.00, 10.00 - (studioState.layers.length - 1) * 1.00) : 10.00) : 1.00;
       } else {
-        layer.thicknessMm = Math.max(5.00, parseFloat(layer.thicknessMm || 5.00));
+        layer.thicknessMm = Math.max(1.00, parseFloat(layer.thicknessMm || 1.00));
       }
       const thicknessMm = parseFloat(layer.thicknessMm).toFixed(2);
       const zStart = runningZ;
@@ -1088,8 +1088,8 @@ document.addEventListener('DOMContentLoaded', () => {
             </select>
           </div>
           <div class="layer-height-inputs">
-            <div class="layer-mm-box" title="${idx === 0 ? 'Base foundation thickness (auto-adjusts to total)' : 'Color layer thickness (minimum 5.0 mm)'}">
-              <input type="number" class="layer-height-mm-input" value="${thicknessMm}" min="5.0" max="50" step="0.5" data-idx="${idx}" />
+            <div class="layer-mm-box" title="${idx === 0 ? 'Base foundation thickness (auto-adjusts to total)' : 'Color layer thickness (minimum 1.0 mm)'}">
+              <input type="number" class="layer-height-mm-input" value="${thicknessMm}" min="1.0" max="50" step="0.1" data-idx="${idx}" />
               <span class="layer-unit-label">mm</span>
             </div>
             <span class="layer-z-range-badge" title="Print height range along Z axis">Z: ${zStart.toFixed(2)} – ${zEnd.toFixed(2)} mm</span>
@@ -1278,13 +1278,13 @@ document.addEventListener('DOMContentLoaded', () => {
           if (isNaN(val)) return;
           saveUndoState();
           if (idx > 0) {
-            // Any color layer: minimum 5.00 mm
-            val = Math.max(5.00, val);
+            // Any color layer: minimum 1.00 mm
+            val = Math.max(1.00, val);
             studioState.layers[idx].thicknessMm = parseFloat(val.toFixed(2));
             adjustBaseLayerForTotal();
           } else {
-            // Base layer: minimum 5.00 mm
-            val = Math.max(5.00, val);
+            // Base layer: minimum 1.00 mm
+            val = Math.max(1.00, val);
             studioState.layers[0].thicknessMm = parseFloat(val.toFixed(2));
             updateTotalThicknessFromLayers();
           }
@@ -1395,9 +1395,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const upperCount = Math.max(1, total - 1);
-    const defaultColorMm = 5.00;
+    const defaultColorMm = 1.00;
 
-    // Set roles and ensure min 5.00 mm for all upper layers
+    // Set roles and ensure min 1.00 mm for all upper layers
     studioState.layers.forEach((l, i) => {
       if (i > 0) {
         if (!l.role) {
@@ -1406,7 +1406,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (l.thicknessMm === undefined) {
           l.thicknessMm = defaultColorMm;
         } else {
-          l.thicknessMm = Math.max(5.00, parseFloat(l.thicknessMm || 5.00));
+          l.thicknessMm = Math.max(1.00, parseFloat(l.thicknessMm || 1.00));
         }
       }
     });
@@ -1693,14 +1693,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const totalThick_mm = studioState.totalThicknessMm;
 
     const baseLayer = studioState.layers.find(l => l.role === 'base') || studioState.layers[0];
-    const baseThickness = Math.max(5.00, (baseLayer && baseLayer.thicknessMm !== undefined) ? baseLayer.thicknessMm : (studioState.layers[0]?.thicknessMm || 5.00));
+    const baseThickness = Math.max(1.00, (baseLayer && baseLayer.thicknessMm !== undefined) ? baseLayer.thicknessMm : (studioState.layers[0]?.thicknessMm || 7.00));
 
     let currentCumulativeTop = baseThickness;
     studioState.layers.forEach((layer, idx) => {
       const isBase = (layer.role === 'base' || idx === 0);
       const layerStepThick = isBase 
         ? baseThickness 
-        : Math.max(5.00, layer.thicknessMm !== undefined ? layer.thicknessMm : 5.00);
+        : Math.max(1.00, layer.thicknessMm !== undefined ? layer.thicknessMm : 1.00);
 
       let ownZStart = 0;
       let ownExtrudeDepth = baseThickness;
@@ -1712,7 +1712,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentCumulativeTop += layerStepThick;
         // Extrude from base foundation up to this layer's top height so it is solidly supported without floating
         ownZStart = baseThickness;
-        ownExtrudeDepth = Math.max(5.00, currentCumulativeTop - baseThickness);
+        ownExtrudeDepth = Math.max(1.00, currentCumulativeTop - baseThickness);
       }
 
       const layerGroup = new THREE.Group();
@@ -2154,7 +2154,7 @@ ${buildXml}  </build>
       const fixedWidthMm = studioState.fixedWidthMm || 150.0;
       const totalThicknessMm = studioState.totalThicknessMm || 10.0;
       const baseLayer = studioState.layers.find(l => l.role === 'base') || studioState.layers[0];
-      const baseThickness = Math.max(5.00, (baseLayer && baseLayer.thicknessMm !== undefined) ? baseLayer.thicknessMm : (studioState.layers[0]?.thicknessMm || 5.00));
+      const baseThickness = Math.max(1.00, (baseLayer && baseLayer.thicknessMm !== undefined) ? baseLayer.thicknessMm : (studioState.layers[0]?.thicknessMm || 7.00));
 
       // Extract triangles for each layer
       const layerPrintSpecs = [];
@@ -2164,7 +2164,7 @@ ${buildXml}  </build>
         const isBase = (layer.role === 'base' || idx === 0);
         const thickMm = isBase 
           ? baseThickness 
-          : Math.max(5.00, parseFloat(layer.thicknessMm !== undefined ? layer.thicknessMm : 5.00));
+          : Math.max(1.00, parseFloat(layer.thicknessMm !== undefined ? layer.thicknessMm : 1.00));
         const group = threeLayerMeshes[idx];
         const triangles = group ? extractTrianglesFromObject(group) : [];
 
@@ -2366,7 +2366,7 @@ ${buildXml}  </build>
 
     const jobName = (studioState.jobName || 'Nameplate').replace(/[^a-zA-Z0-9_-]/g, '_');
     const baseLayer = studioState.layers.find(l => l.role === 'base') || studioState.layers[0];
-    const baseThick = Math.max(5.00, (baseLayer && baseLayer.thicknessMm !== undefined) ? baseLayer.thicknessMm : (studioState.layers[0]?.thicknessMm || 5.00));
+    const baseThick = Math.max(1.00, (baseLayer && baseLayer.thicknessMm !== undefined) ? baseLayer.thicknessMm : (studioState.layers[0]?.thicknessMm || 7.00));
     let guide = `============================================================\n`;
     guide += `  FDM 3D PRINTING GUIDE: ${jobName}\n`;
     guide += `============================================================\n\n`;
@@ -2389,7 +2389,7 @@ ${buildXml}  </build>
       const isB = (i === 0 || lyr.role === 'base');
       const t = isB 
         ? baseThick 
-        : Math.max(5.00, parseFloat(lyr.thicknessMm !== undefined ? lyr.thicknessMm : 5.00));
+        : Math.max(1.00, parseFloat(lyr.thicknessMm !== undefined ? lyr.thicknessMm : 1.00));
       let pStart = 0, pEnd = baseThick;
       if (isB) {
         pStart = 0; pEnd = baseThick;
