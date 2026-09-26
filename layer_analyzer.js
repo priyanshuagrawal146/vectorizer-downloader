@@ -442,13 +442,13 @@ function analyzeSvgLayers(svgContent, options = {}) {
 
   const totalBuckets = sortedBuckets.length;
   const upperCount = Math.max(1, totalBuckets - 1);
-  const minColorThickMm = 0.80;
+  const minColorThickMm = 5.00;
 
-  // Default step for upper color layers: minimum 0.80 mm
-  const defaultStepMm = (totalBuckets === 1) ? 0 : Math.max(minColorThickMm, Math.min(1.50, parseFloat((3.00 / upperCount).toFixed(2))));
+  // Default step for upper color layers: minimum 5.00 mm
+  const defaultStepMm = (totalBuckets === 1) ? 0 : 5.00;
   // Sum of upper color layers
   const totalUpperThickness = (totalBuckets === 1) ? 0 : parseFloat((defaultStepMm * upperCount).toFixed(2));
-  // Base layer absorbs remainder so total is fully 10.00 mm
+  // Base layer absorbs remainder so total is fully 10.00 mm (or at least 5.00 mm)
   const baseThicknessMm = (totalBuckets === 1) ? 10.00 : Math.max(minColorThickMm, parseFloat((10.00 - totalUpperThickness).toFixed(2)));
 
   let cumulativeZ = 0;
