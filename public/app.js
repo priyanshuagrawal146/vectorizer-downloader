@@ -1501,6 +1501,19 @@ document.addEventListener('DOMContentLoaded', () => {
       threeControls.enableDamping = true;
       threeControls.dampingFactor = 0.05;
       threeControls.maxPolarAngle = Math.PI / 2 + 0.1;
+      threeControls.enablePan = false; // Always keep model locked in center (no panning)
+      threeControls.screenSpacePanning = false;
+      threeControls.minDistance = 20;
+      threeControls.maxDistance = 1500;
+      threeControls.mouseButtons = {
+        LEFT: THREE.MOUSE.ROTATE,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.ROTATE
+      };
+      threeControls.touches = {
+        ONE: THREE.TOUCH.ROTATE,
+        TWO: THREE.TOUCH.DOLLY_PAN
+      };
 
       // Lights
       const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
@@ -1596,7 +1609,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function animateThree() {
     requestAnimationFrame(animateThree);
-    if (threeControls) threeControls.update();
+    if (threeControls) {
+      // Ensure target X and Y remain strictly locked at origin (0, 0)
+      threeControls.target.x = 0;
+      threeControls.target.y = 0;
+      threeControls.update();
+    }
     if (threeRenderer && threeScene && threeCamera) {
       threeRenderer.render(threeScene, threeCamera);
     }
@@ -1615,7 +1633,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setActiveViewBtn(viewTop);
     const maxDim = Math.max(studioState.fixedWidthMm || 150, studioState.proportionalHeightMm || 100);
     threeCamera.position.set(0, 0, maxDim * 1.5);
-    threeControls.target.set(0, 0, 0);
+    threeControls.target.set(0, 0, studioState.totalThicknessMm / 2);
     threeControls.update();
   });
 
@@ -1953,14 +1971,13 @@ document.addEventListener('DOMContentLoaded', () => {
       return (lyr.paths || []).some(rawD => (rawD.match(/[Mm][^Mm]+/g) || []).length > 1);
     });
 
-    // Auto-center root group in the viewport (only once on load or explicit reset)
-    if (!studioState.modelCentered || resetCamera) {
-      const box = new THREE.Box3().setFromObject(threeRootGroup);
-      const center = box.getCenter(new THREE.Vector3());
-      threeRootGroup.position.x = -center.x;
-      threeRootGroup.position.y = -center.y;
-      studioState.modelCentered = true;
-    }
+    // Auto-center root group in the viewport (always keep model mathematically centered at origin)
+    threeRootGroup.position.set(0, 0, 0);
+    threeRootGroup.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(threeRootGroup);
+    const center = box.getCenter(new THREE.Vector3());
+    threeRootGroup.position.x = -center.x;
+    threeRootGroup.position.y = -center.y;
 
     // Adjust camera to frame model nicely (only once on load or explicit reset)
     if (!studioState.cameraInitialized || resetCamera) {
@@ -1971,8 +1988,8 @@ document.addEventListener('DOMContentLoaded', () => {
       studioState.cameraInitialized = true;
     } else {
       // Keep user's exact camera angle, zoom, and orientation completely intact!
-      // Only keep the orbit pivot Z aligned to mid-thickness
-      threeControls.target.z = totalThick_mm / 2;
+      // Keep the orbit pivot locked to the model center (0, 0, mid-thickness)
+      threeControls.target.set(0, 0, totalThick_mm / 2);
       threeControls.update();
     }
 
