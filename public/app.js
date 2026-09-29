@@ -2064,9 +2064,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (flipWinding) {
               const tmp = v2; v2 = v3; v3 = tmp;
             }
-            if (v1.distanceToSquared(v2) < 1e-8 || v2.distanceToSquared(v3) < 1e-8 || v3.distanceToSquared(v1) < 1e-8) {
-              continue;
-            }
             triangles.push([v1, v2, v3]);
           }
         } else {
@@ -2077,9 +2074,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (flipWinding) {
               const tmp = v2; v2 = v3; v3 = tmp;
             }
-            if (v1.distanceToSquared(v2) < 1e-8 || v2.distanceToSquared(v3) < 1e-8 || v3.distanceToSquared(v1) < 1e-8) {
-              continue;
-            }
             triangles.push([v1, v2, v3]);
           }
         }
@@ -2089,36 +2083,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return triangles;
   }
 
-  function trianglesToBinaryStl(rawTriangles, headerTitle = "3D FDM Nameplate Studio STL") {
-    // Sanitize triangles: eliminate zero-area slivers, collapsed edges, and inverted degeneracies
-    const triangles = [];
-    const e1 = new THREE.Vector3();
-    const e2 = new THREE.Vector3();
-    const norm = new THREE.Vector3();
-
-    for (let i = 0; i < rawTriangles.length; i++) {
-      const [v1, v2, v3] = rawTriangles[i];
-      if (!v1 || !v2 || !v3) continue;
-
-      if (v1.distanceToSquared(v2) < 1e-8 ||
-          v2.distanceToSquared(v3) < 1e-8 ||
-          v3.distanceToSquared(v1) < 1e-8) {
-        continue;
-      }
-
-      e1.subVectors(v2, v1);
-      e2.subVectors(v3, v1);
-      norm.crossVectors(e1, e2);
-
-      // Filter out zero-area colinear triangles that cause non-manifold edges
-      if (norm.lengthSq() < 1e-10) {
-        continue;
-      }
-
-      norm.normalize();
-      triangles.push({ v1, v2, v3, norm: norm.clone() });
-    }
-
+  function trianglesToBinaryStl(triangles, headerTitle = "3D FDM Nameplate Studio STL") {
     const bufferLength = 84 + (50 * triangles.length);
     const arrayBuffer = new ArrayBuffer(bufferLength);
     const dataView = new DataView(arrayBuffer);
@@ -2131,14 +2096,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // 4 bytes triangle count (little-endian uint32)
     dataView.setUint32(80, triangles.length, true);
 
+    const cb = new THREE.Vector3();
+    const ab = new THREE.Vector3();
+
     let offset = 84;
     for (let i = 0; i < triangles.length; i++) {
-      const { v1, v2, v3, norm } = triangles[i];
+      const [v1, v2, v3] = triangles[i];
 
-      // Normal (counter-clockwise right-hand rule)
-      dataView.setFloat32(offset, norm.x || 0, true); offset += 4;
-      dataView.setFloat32(offset, norm.y || 0, true); offset += 4;
-      dataView.setFloat32(offset, norm.z || 0, true); offset += 4;
+      cb.subVectors(v3, v2);
+      ab.subVectors(v1, v2);
+      cb.cross(ab).normalize();
+
+      // Normal
+      dataView.setFloat32(offset, cb.x || 0, true); offset += 4;
+      dataView.setFloat32(offset, cb.y || 0, true); offset += 4;
+      dataView.setFloat32(offset, cb.z || 0, true); offset += 4;
 
       // Vertex 1
       dataView.setFloat32(offset, v1.x, true); offset += 4;
