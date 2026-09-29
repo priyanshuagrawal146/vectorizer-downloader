@@ -1488,7 +1488,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const height = threeContainer.clientHeight || 480;
 
       threeCamera = new THREE.PerspectiveCamera(45, width / height, 1, 3000);
-      threeCamera.position.set(0, -180, 220);
+      threeCamera.position.set(20, 50, 240);
 
       threeRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
       threeRenderer.setSize(width, height);
@@ -1500,7 +1500,8 @@ document.addEventListener('DOMContentLoaded', () => {
       threeControls = new THREE.OrbitControls(threeCamera, threeRenderer.domElement);
       threeControls.enableDamping = true;
       threeControls.dampingFactor = 0.05;
-      threeControls.maxPolarAngle = Math.PI / 2 + 0.1;
+      threeControls.maxPolarAngle = Math.PI - 0.05;
+      threeControls.minPolarAngle = 0.05;
       threeControls.enablePan = false; // Always keep model locked in center (no panning)
       threeControls.screenSpacePanning = false;
       threeControls.minDistance = 20;
@@ -1512,7 +1513,7 @@ document.addEventListener('DOMContentLoaded', () => {
       };
       threeControls.touches = {
         ONE: THREE.TOUCH.ROTATE,
-        TWO: THREE.TOUCH.DOLLY_PAN
+        TWO: THREE.TOUCH.DOLLY
       };
 
       // Lights
@@ -1592,6 +1593,12 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       window.addEventListener('resize', onThreeResize);
+      if (window.ResizeObserver && threeContainer) {
+        const ro = new ResizeObserver(() => {
+          onThreeResize();
+        });
+        ro.observe(threeContainer);
+      }
       animateThree();
     }
 
@@ -1624,15 +1631,7 @@ document.addEventListener('DOMContentLoaded', () => {
   viewPerspective.addEventListener('click', () => {
     setActiveViewBtn(viewPerspective);
     const maxDim = Math.max(studioState.fixedWidthMm || 150, studioState.proportionalHeightMm || 100);
-    threeCamera.position.set(0, -maxDim * 1.15, maxDim * 1.05);
-    threeControls.target.set(0, 0, studioState.totalThicknessMm / 2);
-    threeControls.update();
-  });
-
-  viewTop.addEventListener('click', () => {
-    setActiveViewBtn(viewTop);
-    const maxDim = Math.max(studioState.fixedWidthMm || 150, studioState.proportionalHeightMm || 100);
-    threeCamera.position.set(0, 0, maxDim * 1.5);
+    threeCamera.position.set(maxDim * 0.15, maxDim * 0.35, maxDim * 1.45);
     threeControls.target.set(0, 0, studioState.totalThicknessMm / 2);
     threeControls.update();
   });
@@ -1640,7 +1639,15 @@ document.addEventListener('DOMContentLoaded', () => {
   viewFront.addEventListener('click', () => {
     setActiveViewBtn(viewFront);
     const maxDim = Math.max(studioState.fixedWidthMm || 150, studioState.proportionalHeightMm || 100);
-    threeCamera.position.set(0, -maxDim * 1.7, 10);
+    threeCamera.position.set(0, 0, maxDim * 1.65);
+    threeControls.target.set(0, 0, studioState.totalThicknessMm / 2);
+    threeControls.update();
+  });
+
+  viewTop.addEventListener('click', () => {
+    setActiveViewBtn(viewTop);
+    const maxDim = Math.max(studioState.fixedWidthMm || 150, studioState.proportionalHeightMm || 100);
+    threeCamera.position.set(0, maxDim * 1.5, maxDim * 0.25);
     threeControls.target.set(0, 0, studioState.totalThicknessMm / 2);
     threeControls.update();
   });
@@ -1982,7 +1989,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Adjust camera to frame model nicely (only once on load or explicit reset)
     if (!studioState.cameraInitialized || resetCamera) {
       const maxDim = Math.max(totalW_mm, totalH_mm);
-      threeCamera.position.set(0, -maxDim * 1.15, maxDim * 1.05);
+      threeCamera.position.set(maxDim * 0.15, maxDim * 0.35, maxDim * 1.45);
       threeControls.target.set(0, 0, totalThick_mm / 2);
       threeControls.update();
       studioState.cameraInitialized = true;

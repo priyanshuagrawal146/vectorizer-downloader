@@ -1048,8 +1048,9 @@ body {
 /* Studio Split Grid */
 .studio-grid {
   display: grid;
-  grid-template-columns: 420px 1fr;
+  grid-template-columns: 440px 1fr;
   gap: 1.5rem;
+  align-items: start;
 }
 
 @media (max-width: 1024px) {
@@ -1772,22 +1773,40 @@ body {
   margin-right: 0.35rem;
 }
 
-/* 3D Viewport Card */
+/* 3D Viewport Column & Card (Sticky & Centered in View) */
+.studio-viewport-col {
+  position: sticky;
+  top: 1rem;
+  height: calc(100vh - 4.5rem);
+  min-height: 520px;
+  max-height: 800px;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 1024px) {
+  .studio-viewport-col {
+    position: static;
+    height: 560px;
+  }
+}
+
 .viewport-card-3d {
   display: flex;
   flex-direction: column;
   height: 100%;
-  min-height: 600px;
+  overflow: hidden;
 }
 
 .viewport-header-3d {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1rem 1.25rem;
+  padding: 0.75rem 1.25rem;
   border-bottom: 1px solid var(--border-color);
   flex-wrap: wrap;
   gap: 0.75rem;
+  flex-shrink: 0;
 }
 
 .viewport-title-group {
@@ -1861,10 +1880,10 @@ body {
 .three-viewport-box {
   position: relative;
   flex: 1;
-  min-height: 480px;
+  min-height: 350px;
   background: radial-gradient(circle at center, #181d2e 0%, #0d1017 100%);
   overflow: hidden;
-  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  border-radius: 0;
 }
 
 .three-viewport-box canvas {
@@ -1908,11 +1927,12 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.6rem 1.25rem;
+  padding: 0.5rem 1.25rem;
   background: rgba(0, 0, 0, 0.4);
   border-top: 1px solid var(--border-color);
   font-size: 0.75rem;
   color: var(--text-dim);
+  flex-shrink: 0;
 }
 
 .hint-stats {
