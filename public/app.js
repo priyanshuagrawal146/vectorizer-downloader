@@ -2092,11 +2092,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const [v1, v2, v3] = rawTriangles[i];
       if (!v1 || !v2 || !v3) continue;
 
-      // Skip self-degenerate triangles where any 2 vertices are identical (< 0.1 micrometer)
+      // Only skip true zero-width line segment collapses where 2 vertices are identical (< 1 picometer)
       const d12 = (v1.x - v2.x) ** 2 + (v1.y - v2.y) ** 2 + (v1.z - v2.z) ** 2;
       const d23 = (v2.x - v3.x) ** 2 + (v2.y - v3.y) ** 2 + (v2.z - v3.z) ** 2;
       const d31 = (v3.x - v1.x) ** 2 + (v3.y - v1.y) ** 2 + (v3.z - v1.z) ** 2;
-      if (d12 < 1e-8 || d23 < 1e-8 || d31 < 1e-8) continue;
+      if (d12 < 1e-14 || d23 < 1e-14 || d31 < 1e-14) continue;
 
       // Compute outward normal strictly from cross product (v2 - v1) x (v3 - v1)
       const ax = v2.x - v1.x, ay = v2.y - v1.y, az = v2.z - v1.z;
@@ -2108,8 +2108,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (len > 1e-12) {
         nx /= len; ny /= len; nz /= len;
       } else {
-        // Collinear zero-area triangle, skip
-        continue;
+        nx = 0; ny = 0; nz = 0;
       }
 
       cleanTriangles.push({ v1, v2, v3, nx, ny, nz });
