@@ -1816,7 +1816,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Always build base paths using all layers when solidBase is on,
         // so the base is 100% solid foundation under all layers.
         let basePathsHtml = '';
-        if (studioState.solidBase && (!layer.paths || layer.paths.length === 0)) {
+        if (studioState.solidBase) {
           studioState.layers.forEach(l => {
             (l.paths || []).forEach(rawD => {
               basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
