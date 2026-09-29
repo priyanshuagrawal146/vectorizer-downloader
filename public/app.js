@@ -2083,8 +2083,45 @@ document.addEventListener('DOMContentLoaded', () => {
     return triangles;
   }
 
-  function trianglesToBinaryStl(triangles, headerTitle = "3D FDM Nameplate Studio STL") {
-    const bufferLength = 84 + (50 * triangles.length);
+  function trianglesToBinaryStl(rawTriangles, headerTitle = "3D FDM Nameplate Studio STL") {
+    // Filter degenerate line-segments and duplicate triangles to guarantee manifold = yes
+    const cleanTriangles = [];
+    const triSet = new Set();
+
+    const fmt = (p) => `${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)}`;
+
+    for (let i = 0; i < rawTriangles.length; i++) {
+      const [v1, v2, v3] = rawTriangles[i];
+      if (!v1 || !v2 || !v3) continue;
+
+      // Skip self-degenerate triangles where any 2 vertices are identical (< 1 nanometer)
+      const d12 = (v1.x - v2.x) ** 2 + (v1.y - v2.y) ** 2 + (v1.z - v2.z) ** 2;
+      const d23 = (v2.x - v3.x) ** 2 + (v2.y - v3.y) ** 2 + (v2.z - v3.z) ** 2;
+      const d31 = (v3.x - v1.x) ** 2 + (v3.y - v1.y) ** 2 + (v3.z - v1.z) ** 2;
+      if (d12 < 1e-12 || d23 < 1e-12 || d31 < 1e-12) continue;
+
+      // Skip duplicate triangles that cause non-manifold edge counts
+      const pts = [fmt(v1), fmt(v2), fmt(v3)].sort().join('|');
+      if (triSet.has(pts)) continue;
+      triSet.add(pts);
+
+      // Compute outward normal strictly from (v2 - v1) x (v3 - v1) so Bambu Studio never detects reversed faces
+      const ax = v2.x - v1.x, ay = v2.y - v1.y, az = v2.z - v1.z;
+      const bx = v3.x - v1.x, by = v3.y - v1.y, bz = v3.z - v1.z;
+      let nx = ay * bz - az * by;
+      let ny = az * bx - ax * bz;
+      let nz = ax * by - ay * bx;
+      const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      if (len > 1e-12) {
+        nx /= len; ny /= len; nz /= len;
+      } else {
+        nx = 0; ny = 0; nz = 0;
+      }
+
+      cleanTriangles.push({ v1, v2, v3, nx, ny, nz });
+    }
+
+    const bufferLength = 84 + (50 * cleanTriangles.length);
     const arrayBuffer = new ArrayBuffer(bufferLength);
     const dataView = new DataView(arrayBuffer);
 
@@ -2094,23 +2131,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 4 bytes triangle count (little-endian uint32)
-    dataView.setUint32(80, triangles.length, true);
-
-    const cb = new THREE.Vector3();
-    const ab = new THREE.Vector3();
+    dataView.setUint32(80, cleanTriangles.length, true);
 
     let offset = 84;
-    for (let i = 0; i < triangles.length; i++) {
-      const [v1, v2, v3] = triangles[i];
-
-      cb.subVectors(v3, v2);
-      ab.subVectors(v1, v2);
-      cb.cross(ab).normalize();
+    for (let i = 0; i < cleanTriangles.length; i++) {
+      const { v1, v2, v3, nx, ny, nz } = cleanTriangles[i];
 
       // Normal
-      dataView.setFloat32(offset, cb.x || 0, true); offset += 4;
-      dataView.setFloat32(offset, cb.y || 0, true); offset += 4;
-      dataView.setFloat32(offset, cb.z || 0, true); offset += 4;
+      dataView.setFloat32(offset, nx, true); offset += 4;
+      dataView.setFloat32(offset, ny, true); offset += 4;
+      dataView.setFloat32(offset, nz, true); offset += 4;
 
       // Vertex 1
       dataView.setFloat32(offset, v1.x, true); offset += 4;
