@@ -2092,26 +2092,33 @@ document.addEventListener('DOMContentLoaded', () => {
       const [v1, v2, v3] = rawTriangles[i];
       if (!v1 || !v2 || !v3) continue;
 
+      // Single-precision float rounding identical to binary STL IEEE-754 format
+      const x1 = Math.fround(v1.x), y1 = Math.fround(v1.y), z1 = Math.fround(v1.z);
+      const x2 = Math.fround(v2.x), y2 = Math.fround(v2.y), z2 = Math.fround(v2.z);
+      const x3 = Math.fround(v3.x), y3 = Math.fround(v3.y), z3 = Math.fround(v3.z);
+
       // Only skip true zero-width line segment collapses where 2 vertices are identical (< 1 picometer)
-      const d12 = (v1.x - v2.x) ** 2 + (v1.y - v2.y) ** 2 + (v1.z - v2.z) ** 2;
-      const d23 = (v2.x - v3.x) ** 2 + (v2.y - v3.y) ** 2 + (v2.z - v3.z) ** 2;
-      const d31 = (v3.x - v1.x) ** 2 + (v3.y - v1.y) ** 2 + (v3.z - v1.z) ** 2;
+      const d12 = (x1 - x2) ** 2 + (y1 - y2) ** 2 + (z1 - z2) ** 2;
+      const d23 = (x2 - x3) ** 2 + (y2 - y3) ** 2 + (z2 - z3) ** 2;
+      const d31 = (x3 - x1) ** 2 + (y3 - y1) ** 2 + (z3 - z1) ** 2;
       if (d12 < 1e-14 || d23 < 1e-14 || d31 < 1e-14) continue;
 
-      // Compute outward normal strictly from cross product (v2 - v1) x (v3 - v1)
-      const ax = v2.x - v1.x, ay = v2.y - v1.y, az = v2.z - v1.z;
-      const bx = v3.x - v1.x, by = v3.y - v1.y, bz = v3.z - v1.z;
+      // Compute outward normal strictly from float32 cross product (v2 - v1) x (v3 - v1)
+      const ax = x2 - x1, ay = y2 - y1, az = z2 - z1;
+      const bx = x3 - x1, by = y3 - y1, bz = z3 - z1;
       let nx = ay * bz - az * by;
       let ny = az * bx - ax * bz;
       let nz = ax * by - ay * bx;
       const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
-      if (len > 1e-12) {
+      if (len > 1e-9) {
         nx /= len; ny /= len; nz /= len;
       } else {
+        // Micro-sliver: set normal to (0, 0, 0) so slicers derive orientation from winding
+        // and never trigger catastrophic floating-point sign disagreement / reversed faces!
         nx = 0; ny = 0; nz = 0;
       }
 
-      cleanTriangles.push({ v1, v2, v3, nx, ny, nz });
+      cleanTriangles.push({ x1, y1, z1, x2, y2, z2, x3, y3, z3, nx, ny, nz });
     }
 
     const bufferLength = 84 + (50 * cleanTriangles.length);
@@ -2128,7 +2135,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let offset = 84;
     for (let i = 0; i < cleanTriangles.length; i++) {
-      const { v1, v2, v3, nx, ny, nz } = cleanTriangles[i];
+      const { x1, y1, z1, x2, y2, z2, x3, y3, z3, nx, ny, nz } = cleanTriangles[i];
 
       // Normal
       dataView.setFloat32(offset, nx, true); offset += 4;
@@ -2136,19 +2143,19 @@ document.addEventListener('DOMContentLoaded', () => {
       dataView.setFloat32(offset, nz, true); offset += 4;
 
       // Vertex 1
-      dataView.setFloat32(offset, v1.x, true); offset += 4;
-      dataView.setFloat32(offset, v1.y, true); offset += 4;
-      dataView.setFloat32(offset, v1.z, true); offset += 4;
+      dataView.setFloat32(offset, x1, true); offset += 4;
+      dataView.setFloat32(offset, y1, true); offset += 4;
+      dataView.setFloat32(offset, z1, true); offset += 4;
 
       // Vertex 2
-      dataView.setFloat32(offset, v2.x, true); offset += 4;
-      dataView.setFloat32(offset, v2.y, true); offset += 4;
-      dataView.setFloat32(offset, v2.z, true); offset += 4;
+      dataView.setFloat32(offset, x2, true); offset += 4;
+      dataView.setFloat32(offset, y2, true); offset += 4;
+      dataView.setFloat32(offset, z2, true); offset += 4;
 
       // Vertex 3
-      dataView.setFloat32(offset, v3.x, true); offset += 4;
-      dataView.setFloat32(offset, v3.y, true); offset += 4;
-      dataView.setFloat32(offset, v3.z, true); offset += 4;
+      dataView.setFloat32(offset, x3, true); offset += 4;
+      dataView.setFloat32(offset, y3, true); offset += 4;
+      dataView.setFloat32(offset, z3, true); offset += 4;
 
       // Attribute byte count
       dataView.setUint16(offset, 0, true); offset += 2;
