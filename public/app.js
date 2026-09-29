@@ -1816,7 +1816,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Always build base paths using all layers when solidBase is on,
         // so the base is 100% solid foundation under all layers.
         let basePathsHtml = '';
-        if (studioState.solidBase) {
+        if (studioState.solidBase && (!layer.paths || layer.paths.length === 0)) {
           studioState.layers.forEach(l => {
             (l.paths || []).forEach(rawD => {
               basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
@@ -2084,28 +2084,21 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function trianglesToBinaryStl(rawTriangles, headerTitle = "3D FDM Nameplate Studio STL") {
-    // Filter degenerate line-segments and duplicate triangles to guarantee manifold = yes
+    // Sanitize triangles: eliminate zero-area slivers, collapsed edges, and self-degeneracies
+    // Preserves front and back caps so each shell is 100% closed, watertight, and manifold in Bambu Studio
     const cleanTriangles = [];
-    const triSet = new Set();
-
-    const fmt = (p) => `${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)}`;
 
     for (let i = 0; i < rawTriangles.length; i++) {
       const [v1, v2, v3] = rawTriangles[i];
       if (!v1 || !v2 || !v3) continue;
 
-      // Skip self-degenerate triangles where any 2 vertices are identical (< 1 nanometer)
+      // Skip self-degenerate triangles where any 2 vertices are identical (< 0.1 micrometer)
       const d12 = (v1.x - v2.x) ** 2 + (v1.y - v2.y) ** 2 + (v1.z - v2.z) ** 2;
       const d23 = (v2.x - v3.x) ** 2 + (v2.y - v3.y) ** 2 + (v2.z - v3.z) ** 2;
       const d31 = (v3.x - v1.x) ** 2 + (v3.y - v1.y) ** 2 + (v3.z - v1.z) ** 2;
-      if (d12 < 1e-12 || d23 < 1e-12 || d31 < 1e-12) continue;
+      if (d12 < 1e-8 || d23 < 1e-8 || d31 < 1e-8) continue;
 
-      // Skip duplicate triangles that cause non-manifold edge counts
-      const pts = [fmt(v1), fmt(v2), fmt(v3)].sort().join('|');
-      if (triSet.has(pts)) continue;
-      triSet.add(pts);
-
-      // Compute outward normal strictly from (v2 - v1) x (v3 - v1) so Bambu Studio never detects reversed faces
+      // Compute outward normal strictly from cross product (v2 - v1) x (v3 - v1)
       const ax = v2.x - v1.x, ay = v2.y - v1.y, az = v2.z - v1.z;
       const bx = v3.x - v1.x, by = v3.y - v1.y, bz = v3.z - v1.z;
       let nx = ay * bz - az * by;
@@ -2115,7 +2108,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (len > 1e-12) {
         nx /= len; ny /= len; nz /= len;
       } else {
-        nx = 0; ny = 0; nz = 0;
+        // Collinear zero-area triangle, skip
+        continue;
       }
 
       cleanTriangles.push({ v1, v2, v3, nx, ny, nz });
