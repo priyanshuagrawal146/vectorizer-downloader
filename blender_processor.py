@@ -128,11 +128,11 @@ def process_nameplate_blender(config_path):
         ys = [p.co.y for p in pts]
         return (max(xs) - min(xs)) * (max(ys) - min(ys))
 
-    # 2. Extrude and stack layers cleanly along Z sequentially (anchored to base, no floating parts)
+    # 2. Extrude and stack layers cleanly along Z sequentially (strictly layer-wise printing)
     base_layer = next((l for l in layers if l.get('role') == 'base'), layers[0] if layers else None)
     base_thickness_mm = float(base_layer['thickness_mm']) if base_layer and 'thickness_mm' in base_layer else 7.00
 
-    cumulative_top_mm = base_thickness_mm
+    current_z_mm = 0.0
     layer_print_specs = []
 
     for idx, layer in enumerate(layers):
@@ -150,26 +150,19 @@ def process_nameplate_blender(config_path):
             continue
 
         is_base = (idx == 0 or layer.get('role') == 'base')
-        if 'thickness_mm' in layer:
-            layer_thick_mm = float(layer['thickness_mm'])
-        else:
-            layer_pct = float(layer.get('height_pct', 15))
-            layer_thick_mm = max(0.1, (layer_pct / 100.0) * total_height_mm)
-
         if is_base:
             step_thickness_mm = base_thickness_mm
-            z_start_mm = 0.0
-            z_end_mm = base_thickness_mm
-            pause_start_mm = 0.0
-            pause_end_mm = base_thickness_mm
+        elif 'thickness_mm' in layer:
+            step_thickness_mm = max(0.1, float(layer['thickness_mm']))
         else:
-            pause_start_mm = cumulative_top_mm
-            cumulative_top_mm += layer_thick_mm
-            pause_end_mm = cumulative_top_mm
-            # Anchor to base plate so feature is physically solid with no floating gap
-            z_start_mm = base_thickness_mm
-            step_thickness_mm = max(0.1, cumulative_top_mm - base_thickness_mm)
-            z_end_mm = cumulative_top_mm
+            layer_pct = float(layer.get('height_pct', 15))
+            step_thickness_mm = max(0.1, (layer_pct / 100.0) * total_height_mm)
+
+        z_start_mm = current_z_mm
+        z_end_mm = z_start_mm + step_thickness_mm
+        pause_start_mm = z_start_mm
+        pause_end_mm = z_end_mm
+        current_z_mm = z_end_mm
 
         step_thick_m = step_thickness_mm / 1000.0
         z_start_m = z_start_mm / 1000.0
@@ -451,7 +444,7 @@ def process_nameplate_blender(config_path):
         'job_name': job_name,
         'fixed_width_mm': fixed_width_mm,
         'proportional_height_mm': proportional_height_mm,
-        'total_height_mm': round(cumulative_top_mm, 2),
+        'total_height_mm': round(current_z_mm, 2),
         'zip_file': zip_filename,
         'zip_path': zip_path,
         'bambu_3mf': three_mf_filename if os.path.exists(three_mf_path) else None,

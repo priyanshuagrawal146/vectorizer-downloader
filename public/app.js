@@ -1847,25 +1847,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const baseLayer = studioState.layers.find(l => l.role === 'base') || studioState.layers[0];
     const baseThickness = Math.max(0.10, (baseLayer && baseLayer.thicknessMm !== undefined) ? baseLayer.thicknessMm : (studioState.layers[0]?.thicknessMm || 7.00));
 
-    let currentCumulativeTop = baseThickness;
+    let runningZ = 0;
     studioState.layers.forEach((layer, idx) => {
       const isBase = (layer.role === 'base' || idx === 0);
       const layerStepThick = isBase 
         ? baseThickness 
         : Math.max(0.10, layer.thicknessMm !== undefined ? layer.thicknessMm : 1.00);
 
-      let ownZStart = 0;
-      let ownExtrudeDepth = baseThickness;
-
-      if (isBase) {
-        ownZStart = 0;
-        ownExtrudeDepth = baseThickness;
-      } else {
-        currentCumulativeTop += layerStepThick;
-        // Extrude from base foundation up to this layer's top height so it is solidly supported without floating
-        ownZStart = baseThickness;
-        ownExtrudeDepth = Math.max(0.10, currentCumulativeTop - baseThickness);
-      }
+      const ownZStart = runningZ;
+      const ownExtrudeDepth = layerStepThick;
+      runningZ += layerStepThick;
 
       const layerGroup = new THREE.Group();
       layerGroup.userData = { baseZ: ownZStart, layerIndex: idx };
@@ -2351,7 +2342,7 @@ ${buildXml}  </build>
 
       // Extract triangles for each layer
       const layerPrintSpecs = [];
-      let cumulativeZ = baseThickness;
+      let runningZ = 0;
 
       studioState.layers.forEach((layer, idx) => {
         const isBase = (layer.role === 'base' || idx === 0);
@@ -2361,23 +2352,11 @@ ${buildXml}  </build>
         const group = threeLayerMeshes[idx];
         const triangles = group ? extractTrianglesFromObject(group) : [];
 
-        let zStart = 0;
-        let zEnd = baseThickness;
-        let pauseStart = 0;
-        let pauseEnd = baseThickness;
-
-        if (isBase) {
-          zStart = 0;
-          zEnd = baseThickness;
-          pauseStart = 0;
-          pauseEnd = baseThickness;
-        } else {
-          pauseStart = cumulativeZ;
-          cumulativeZ += thickMm;
-          pauseEnd = cumulativeZ;
-          zStart = baseThickness;
-          zEnd = cumulativeZ;
-        }
+        const zStart = runningZ;
+        const zEnd = runningZ + thickMm;
+        const pauseStart = zStart;
+        const pauseEnd = zEnd;
+        runningZ = zEnd;
 
         const rawName = layer.name || `Layer ${idx + 1}`;
         const cleanName = `${String(idx + 1).padStart(2, '0')}_${rawName.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
