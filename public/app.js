@@ -1196,7 +1196,7 @@ document.addEventListener('DOMContentLoaded', () => {
       row.innerHTML = `
         <div class="layer-card-header">
           <div class="layer-card-left">
-            <label class="layer-checkbox-container" title="Select to merge or combine">
+            <label class="layer-checkbox-container" title="Select layers to merge or combine">
               <input type="checkbox" class="layer-select-checkbox" data-idx="${idx}" ${isSelected ? 'checked' : ''} />
             </label>
             <div class="layer-order-num" title="Layer ${idx + 1}">${idx + 1}</div>
@@ -1205,8 +1205,8 @@ document.addEventListener('DOMContentLoaded', () => {
               <input type="color" class="layer-color-picker" value="${colorHexVal}" style="opacity:0;position:absolute;pointer-events:none;" />
             </label>
             <span class="layer-color-hex-badge" title="Filament Color Hex">${colorHexVal}</span>
-            <input type="text" class="layer-name-input" value="${layer.name}" data-idx="${idx}" title="Click to rename layer" />
-            ${layer.isCombined ? '<span class="badge badge-combine" title="Combined layer with hollow cutouts">⧉</span>' : ''}
+            <input type="text" class="layer-name-input" value="${layer.name}" data-idx="${idx}" placeholder="Layer name" title="Click to rename layer" />
+            ${layer.isCombined ? '<span class="badge badge-combine" title="Combined layer with hollow cutouts">⧉ Cutout</span>' : ''}
           </div>
           <div class="layer-card-right">
             <div class="layer-reorder-btns">
@@ -1214,8 +1214,6 @@ document.addEventListener('DOMContentLoaded', () => {
               <button class="btn-move btn-move-down" data-idx="${idx}" ${idx === studioState.layers.length - 1 ? 'disabled' : ''} title="Move Later (Higher Z)">▼</button>
             </div>
             <div class="layer-tools-group">
-              <button class="btn-layer-tool btn-merge ${isMergeOpen ? 'btn-merge-active' : ''}" data-idx="${idx}" title="Merge into another layer (Solid Union)" type="button">⇄</button>
-              <button class="btn-layer-tool btn-combine ${isCombineOpen ? 'btn-combine-active' : ''}" data-idx="${idx}" title="Combine into another layer (Hollow Cutout)" type="button">⧉</button>
               <button class="btn-layer-tool btn-delete" data-idx="${idx}" title="Delete layer" type="button">🗑️</button>
             </div>
           </div>
@@ -1223,18 +1221,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         <div class="layer-card-sub">
           <div class="layer-role-pill-wrap">
-            <span class="layer-sub-label">Print:</span>
             <select class="layer-role-select ${roleClass}" data-idx="${idx}" title="Set print behavior">
               <option value="base" ${layer.role === 'base' ? 'selected' : ''}>Base Foundation</option>
               <option value="top" ${(layer.role === 'top' || layer.role === 'raised') ? 'selected' : ''}>Raised on Top</option>
-              <option value="cutout" ${layer.role === 'cutout' ? 'selected' : ''}>Cutout (Hole)</option>
+              <option value="cutout" ${layer.role === 'cutout' ? 'selected' : ''}>Hollow Cutout</option>
               <option value="mid" ${layer.role === 'mid' ? 'selected' : ''}>Artwork Plate</option>
             </select>
           </div>
 
           <div class="layer-dimensions-wrap">
             <div class="layer-mm-box" title="${idx === 0 ? 'Base foundation thickness' : 'Layer thickness (editable in mm)'}">
-              <span class="layer-sub-label">Thick:</span>
+              <span class="layer-unit-prefix">Thick</span>
               <input type="number" class="layer-height-mm-input" value="${thicknessMm}" min="0.1" max="50" step="0.1" data-idx="${idx}" />
               <span class="layer-unit-label">mm</span>
             </div>
@@ -1401,10 +1398,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Delete button
       const deleteBtn = row.querySelector('.btn-delete');
-      deleteBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        deleteLayer(idx);
-      });
+      if (deleteBtn) {
+        deleteBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          deleteLayer(idx);
+        });
+      }
 
       // Name editing
       const nameInput = row.querySelector('.layer-name-input');
@@ -1494,16 +1493,29 @@ document.addEventListener('DOMContentLoaded', () => {
     const validSelected = Array.from(studioState.selectedLayerIndices).filter(i => studioState.layers[i]);
     studioState.selectedLayerIndices = new Set(validSelected);
 
-    if (validSelected.length >= 2) {
+    if (validSelected.length >= 1) {
       multiMergeBar.classList.remove('hidden');
-      if (selectedLayersBadge) selectedLayersBadge.textContent = `${validSelected.length} Layers Selected`;
-      if (multiMergeTargetSelect) {
-        let opts = '';
-        validSelected.forEach(sIdx => {
-          const l = studioState.layers[sIdx];
-          opts += `<option value="${sIdx}">Layer ${sIdx + 1}: ${l.name} (${l.color})</option>`;
-        });
-        multiMergeTargetSelect.innerHTML = opts;
+      if (validSelected.length >= 2) {
+        if (selectedLayersBadge) selectedLayersBadge.textContent = `${validSelected.length} Layers Selected`;
+        if (multiMergeTargetSelect) {
+          let opts = '';
+          validSelected.forEach(sIdx => {
+            const l = studioState.layers[sIdx];
+            opts += `<option value="${sIdx}">Layer ${sIdx + 1}: ${l.name} (${l.color})</option>`;
+          });
+          multiMergeTargetSelect.innerHTML = opts;
+          multiMergeTargetSelect.disabled = false;
+        }
+        if (btnConfirmMultiMerge) btnConfirmMultiMerge.disabled = false;
+        if (btnConfirmMultiCombine) btnConfirmMultiCombine.disabled = false;
+      } else {
+        if (selectedLayersBadge) selectedLayersBadge.textContent = `1 Selected (pick 2nd to Merge)`;
+        if (multiMergeTargetSelect) {
+          multiMergeTargetSelect.innerHTML = `<option value="">Pick 2nd layer...</option>`;
+          multiMergeTargetSelect.disabled = true;
+        }
+        if (btnConfirmMultiMerge) btnConfirmMultiMerge.disabled = true;
+        if (btnConfirmMultiCombine) btnConfirmMultiCombine.disabled = true;
       }
     } else {
       multiMergeBar.classList.add('hidden');
