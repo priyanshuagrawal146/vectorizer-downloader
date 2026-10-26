@@ -126,7 +126,8 @@ const server = http.createServer(async (req, res) => {
           fixed_width_mm = 150.0,
           total_height_mm = 10.0,
           layers = [],
-          solid_base = true
+          solid_base = true,
+          auto_solidify_plates = true
         } = JSON.parse(body || '{}');
 
         if (!layers || layers.length === 0) {
@@ -168,6 +169,22 @@ const server = http.createServer(async (req, res) => {
               ...layer,
               paths: structuralPaths.length > 0 ? structuralPaths : layer.paths
             };
+          } else if (auto_solidify_plates !== false && layer.role !== 'cutout') {
+            // Auto-solidify underneath: if higher layers sitting above this layer are raised on top,
+            // include their paths into this underlying plate so it becomes a continuous solid surface without hollow holes
+            const upperRaisedPaths = [];
+            for (let j = i + 1; j < layers.length; j++) {
+              const upper = layers[j];
+              if (upper && upper.role !== 'cutout') {
+                (upper.paths || []).forEach(p => upperRaisedPaths.push(p));
+              }
+            }
+            if (upperRaisedPaths.length > 0) {
+              layerForSvg = {
+                ...layer,
+                paths: [...(layer.paths || []), ...upperRaisedPaths]
+              };
+            }
           }
 
           const layerSvg = generateLayerSvg(layerForSvg, viewBox, width, height, isBase);

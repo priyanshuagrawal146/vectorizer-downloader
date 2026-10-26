@@ -359,6 +359,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const inputTotalThickness = document.getElementById('inputTotalThickness');
   const chkRemoveBackground = document.getElementById('chkRemoveBackground');
   const chkSolidBase = document.getElementById('chkSolidBase');
+  const chkAutoSolidify = document.getElementById('chkAutoSolidify');
 
   const btnAutoMergeSimilar = document.getElementById('btnAutoMergeSimilar');
   const btnUndo = document.getElementById('btnUndo');
@@ -417,6 +418,7 @@ document.addEventListener('DOMContentLoaded', () => {
     totalThicknessMm: 10.0,
     proportionalHeightMm: 100.0,
     solidBase: true,
+    autoSolidifyPlates: true,
     explodeMm: 0,
     wireframe3d: false,
     lastExportResult: null,
@@ -1080,6 +1082,13 @@ document.addEventListener('DOMContentLoaded', () => {
     updateThreeGeometry(false, false);
   });
 
+  if (chkAutoSolidify) {
+    chkAutoSolidify.addEventListener('change', (e) => {
+      studioState.autoSolidifyPlates = e.target.checked;
+      updateThreeGeometry(false, false);
+    });
+  }
+
   sliderExplode.addEventListener('input', (e) => {
     const val = parseFloat(e.target.value);
     studioState.explodeMm = val;
@@ -1163,7 +1172,7 @@ document.addEventListener('DOMContentLoaded', () => {
       row.className = `layer-row-item ${isSelected ? 'layer-row-selected' : ''} ${isInspected ? 'layer-row-inspected' : ''}`;
       row.dataset.idx = idx;
 
-      const roleClass = layer.role === 'base' ? 'role-base' : (layer.role === 'top' ? 'role-top' : 'role-mid');
+      const roleClass = layer.role === 'base' ? 'role-base' : (layer.role === 'cutout' ? 'role-cutout' : ((layer.role === 'top' || layer.role === 'raised') ? 'role-top' : 'role-mid'));
 
       // Calculate thickness in mm (automated default min 1.00 mm for color layers, freely editable down to 0.10 mm)
       if (layer.thicknessMm === undefined || layer.thicknessMm === null) {
@@ -1200,8 +1209,9 @@ document.addEventListener('DOMContentLoaded', () => {
             ${layer.isCombined ? '<span class="badge badge-combine" title="Combined layer with hollow cutouts for overlapping shapes">⧉ Combined</span>' : ''}
             <select class="layer-role-select ${roleClass}" data-idx="${idx}" title="Set Extrusion Role">
               <option value="base" ${layer.role === 'base' ? 'selected' : ''}>Base (Foundation)</option>
-              <option value="mid" ${layer.role === 'mid' ? 'selected' : ''}>Mid (Artwork / Details)</option>
-              <option value="top" ${layer.role === 'top' ? 'selected' : ''}>Top (Raised Text)</option>
+              <option value="top" ${(layer.role === 'top' || layer.role === 'raised') ? 'selected' : ''}>Raised on Top (Solid Plate Underneath)</option>
+              <option value="cutout" ${layer.role === 'cutout' ? 'selected' : ''}>Cutout / Inset (Hollow Hole)</option>
+              <option value="mid" ${layer.role === 'mid' ? 'selected' : ''}>Mid (Artwork Plate)</option>
             </select>
           </div>
           <div class="layer-height-inputs">
@@ -1946,6 +1956,20 @@ document.addEventListener('DOMContentLoaded', () => {
         (layer.paths || []).forEach(rawD => {
           ownPathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
         });
+
+        // Auto-solidify underneath: if this layer is not cutout and studioState.autoSolidifyPlates is enabled,
+        // include paths from all upper layers that are raised on top (not cutout),
+        // so this underlying plate becomes a 100% solid surface without hollow holes under the raised text/artwork
+        if (studioState.autoSolidifyPlates !== false && layer.role !== 'cutout') {
+          for (let upperIdx = idx + 1; upperIdx < studioState.layers.length; upperIdx++) {
+            const upperLayer = studioState.layers[upperIdx];
+            if (upperLayer && upperLayer.role !== 'cutout') {
+              (upperLayer.paths || []).forEach(rawD => {
+                ownPathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
+              });
+            }
+          }
+        }
 
         const ownSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
           <g fill="${layer.color}">${ownPathsHtml}</g>
