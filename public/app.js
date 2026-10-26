@@ -1123,6 +1123,32 @@ document.addEventListener('DOMContentLoaded', () => {
     return c.toUpperCase();
   }
 
+  // Helper: draw un-invertible canvas color swatch
+  function drawSwatchCanvas(canvas, hexColor) {
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width || 56;
+    const h = canvas.height || 56;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = hexColor;
+    ctx.beginPath();
+    const r = 10;
+    ctx.moveTo(r, 0);
+    ctx.lineTo(w - r, 0);
+    ctx.quadraticCurveTo(w, 0, w, r);
+    ctx.lineTo(w, h - r);
+    ctx.quadraticCurveTo(w, h, w - r, h);
+    ctx.lineTo(r, h);
+    ctx.quadraticCurveTo(0, h, 0, h - r);
+    ctx.lineTo(0, r);
+    ctx.quadraticCurveTo(0, 0, r, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = isLightColor(hexColor) ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.45)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+
   // Render the Layer Stack list in sidebar
   function renderLayersList() {
     layersContainer.innerHTML = '';
@@ -1157,23 +1183,19 @@ document.addEventListener('DOMContentLoaded', () => {
       const isPopoverOpen = isMergeOpen || isCombineOpen;
 
       const colorHexVal = normalizeHexColor(layer.color);
-      const isLight = isLightColor(colorHexVal);
-      const strokeColor = isLight ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)';
 
       row.innerHTML = `
         <label class="layer-checkbox-container" title="Select to merge or combine">
           <input type="checkbox" class="layer-select-checkbox" data-idx="${idx}" ${isSelected ? 'checked' : ''} />
         </label>
         <div class="layer-order-num">${idx + 1}</div>
-        <label class="layer-color-preview" data-darkreader-ignore="true" title="Click to edit color or hover to highlight in 3D">
-          <svg class="swatch-svg" viewBox="0 0 28 28" width="28" height="28" data-darkreader-ignore="true">
-            <rect class="swatch-rect" width="28" height="28" rx="6" fill="${colorHexVal}" stroke="${strokeColor}" stroke-width="1.5" />
-          </svg>
-          <input type="color" class="layer-color-picker" value="${colorHexVal}" data-darkreader-ignore="true" style="opacity:0;position:absolute;pointer-events:none;" />
+        <label class="layer-color-preview" title="Click to edit color or hover to highlight in 3D">
+          <canvas class="swatch-canvas" width="56" height="56"></canvas>
+          <input type="color" class="layer-color-picker" value="${colorHexVal}" style="opacity:0;position:absolute;pointer-events:none;" />
         </label>
         <div class="layer-main-info">
           <div class="layer-name-row">
-            <span class="layer-color-hex-badge" data-darkreader-ignore="true" title="Filament Color Hex">${colorHexVal}</span>
+            <span class="layer-color-hex-badge" title="Filament Color Hex">${colorHexVal}</span>
             <input type="text" class="layer-name-input" value="${layer.name}" data-idx="${idx}" />
             ${layer.isCombined ? '<span class="badge badge-combine" title="Combined layer with hollow cutouts for overlapping shapes">⧉ Combined</span>' : ''}
             <select class="layer-role-select ${roleClass}" data-idx="${idx}" title="Set Extrusion Role">
@@ -1201,6 +1223,8 @@ document.addEventListener('DOMContentLoaded', () => {
           <button class="btn-move btn-move-down" data-idx="${idx}" ${idx === studioState.layers.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
         </div>
       `;
+
+      drawSwatchCanvas(row.querySelector('.swatch-canvas'), colorHexVal);
 
       // If merge or combine popover is active for this row
       if (isPopoverOpen) {
@@ -1313,11 +1337,7 @@ document.addEventListener('DOMContentLoaded', () => {
         colorPicker.addEventListener('input', (e) => {
           const newCol = normalizeHexColor(e.target.value);
           studioState.layers[idx].color = newCol;
-          const rect = colorLabel.querySelector('.swatch-rect');
-          if (rect) {
-            rect.setAttribute('fill', newCol);
-            rect.setAttribute('stroke', isLightColor(newCol) ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)');
-          }
+          drawSwatchCanvas(colorLabel.querySelector('.swatch-canvas'), newCol);
           const hexBadge = row.querySelector('.layer-color-hex-badge');
           if (hexBadge) hexBadge.textContent = newCol;
           if (inspectHudColor) inspectHudColor.style.backgroundColor = newCol;
@@ -1328,11 +1348,7 @@ document.addEventListener('DOMContentLoaded', () => {
           saveUndoState();
           const newCol = normalizeHexColor(e.target.value);
           studioState.layers[idx].color = newCol;
-          const rect = colorLabel.querySelector('.swatch-rect');
-          if (rect) {
-            rect.setAttribute('fill', newCol);
-            rect.setAttribute('stroke', isLightColor(newCol) ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)');
-          }
+          drawSwatchCanvas(colorLabel.querySelector('.swatch-canvas'), newCol);
           const hexBadge = row.querySelector('.layer-color-hex-badge');
           if (hexBadge) hexBadge.textContent = newCol;
           if (inspectHudColor) inspectHudColor.style.backgroundColor = newCol;
