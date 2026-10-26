@@ -3,11 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark light">
   <title>Vectorizer.AI SVG Extractor & Downloader</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=2.2.3">
+  <link rel="stylesheet" href="style.css?v=2.2.4">
   <!-- Three.js and 3D Studio Libs -->
   <script src="libs/three.min.js"></script>
   <script src="libs/OrbitControls.js"></script>
@@ -542,7 +543,7 @@
 
             <!-- Interactive Color Selection & Inspection HUD -->
             <div id="layerInspectHud" class="layer-inspect-hud hidden">
-              <span class="inspect-hud-dot" id="inspectHudColor"></span>
+              <span class="inspect-hud-dot" id="inspectHudColor" data-darkreader-ignore="true"></span>
               <span class="inspect-hud-title" id="inspectHudTitle">Layer 1</span>
               <span class="inspect-hud-stats" id="inspectHudStats">12 paths • 1.50mm</span>
               <button id="btnDismissInspect" class="btn-inspect-close" type="button" title="Clear highlight">✕</button>
@@ -595,6 +596,6 @@
     </footer>
   </div>
 
-  <script src="app.js?v=2.2.3"></script>
+  <script src="app.js?v=2.2.4"></script>
 </body>
 </html>

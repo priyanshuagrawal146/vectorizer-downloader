@@ -201,7 +201,9 @@ document.addEventListener('DOMContentLoaded', () => {
     fills.forEach(color => {
       const swatch = document.createElement('div');
       swatch.className = 'palette-swatch';
+      swatch.setAttribute('data-darkreader-ignore', 'true');
       swatch.style.backgroundColor = color;
+      swatch.style.colorScheme = 'light';
       swatch.title = `Click to copy: ${color}`;
       swatch.addEventListener('click', () => {
         navigator.clipboard.writeText(color);
@@ -1093,6 +1095,34 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // Helper: check if color is light (luminance > 180) to add contrast stroke
+  function isLightColor(hex) {
+    if (!hex || typeof hex !== 'string') return false;
+    let c = hex.replace('#', '').trim().toLowerCase();
+    if (c === 'white') return true;
+    if (c.length === 3) c = c.split('').map(x => x + x).join('');
+    if (c.length !== 6) return false;
+    const num = parseInt(c, 16);
+    if (isNaN(num)) return false;
+    const r = (num >> 16) & 255;
+    const g = (num >> 8) & 255;
+    const b = num & 255;
+    return (0.299 * r + 0.587 * g + 0.114 * b) > 175;
+  }
+
+  // Helper: normalize color to uppercase 7-char hex
+  function normalizeHexColor(col) {
+    if (!col || typeof col !== 'string') return '#FFFFFF';
+    let c = col.trim().toLowerCase();
+    if (c === 'white') return '#FFFFFF';
+    if (c === 'black') return '#000000';
+    if (c.startsWith('#')) {
+      if (c.length === 7) return c.toUpperCase();
+      if (c.length === 4) return ('#' + c[1] + c[1] + c[2] + c[2] + c[3] + c[3]).toUpperCase();
+    }
+    return c.toUpperCase();
+  }
+
   // Render the Layer Stack list in sidebar
   function renderLayersList() {
     layersContainer.innerHTML = '';
@@ -1126,18 +1156,24 @@ document.addEventListener('DOMContentLoaded', () => {
       const isCombineOpen = (studioState.activeCombineIdx === idx);
       const isPopoverOpen = isMergeOpen || isCombineOpen;
 
-      const colorHexVal = (layer.color && layer.color.startsWith('#') && layer.color.length === 7) ? layer.color : '#ffffff';
+      const colorHexVal = normalizeHexColor(layer.color);
+      const isLight = isLightColor(colorHexVal);
+      const strokeColor = isLight ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)';
 
       row.innerHTML = `
         <label class="layer-checkbox-container" title="Select to merge or combine">
           <input type="checkbox" class="layer-select-checkbox" data-idx="${idx}" ${isSelected ? 'checked' : ''} />
         </label>
         <div class="layer-order-num">${idx + 1}</div>
-        <label class="layer-color-preview" style="background-color: ${layer.color}" title="Click to edit color or hover to highlight in 3D">
-          <input type="color" class="layer-color-picker" value="${colorHexVal}" style="opacity:0;position:absolute;pointer-events:none;" />
+        <label class="layer-color-preview" data-darkreader-ignore="true" title="Click to edit color or hover to highlight in 3D">
+          <svg class="swatch-svg" viewBox="0 0 28 28" width="28" height="28" data-darkreader-ignore="true">
+            <rect class="swatch-rect" width="28" height="28" rx="6" fill="${colorHexVal}" stroke="${strokeColor}" stroke-width="1.5" />
+          </svg>
+          <input type="color" class="layer-color-picker" value="${colorHexVal}" data-darkreader-ignore="true" style="opacity:0;position:absolute;pointer-events:none;" />
         </label>
         <div class="layer-main-info">
           <div class="layer-name-row">
+            <span class="layer-color-hex-badge" data-darkreader-ignore="true" title="Filament Color Hex">${colorHexVal}</span>
             <input type="text" class="layer-name-input" value="${layer.name}" data-idx="${idx}" />
             ${layer.isCombined ? '<span class="badge badge-combine" title="Combined layer with hollow cutouts for overlapping shapes">⧉ Combined</span>' : ''}
             <select class="layer-role-select ${roleClass}" data-idx="${idx}" title="Set Extrusion Role">
@@ -1275,18 +1311,30 @@ document.addEventListener('DOMContentLoaded', () => {
           colorPicker.click();
         });
         colorPicker.addEventListener('input', (e) => {
-          const newCol = e.target.value;
+          const newCol = normalizeHexColor(e.target.value);
           studioState.layers[idx].color = newCol;
-          colorLabel.style.backgroundColor = newCol;
+          const rect = colorLabel.querySelector('.swatch-rect');
+          if (rect) {
+            rect.setAttribute('fill', newCol);
+            rect.setAttribute('stroke', isLightColor(newCol) ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)');
+          }
+          const hexBadge = row.querySelector('.layer-color-hex-badge');
+          if (hexBadge) hexBadge.textContent = newCol;
           if (inspectHudColor) inspectHudColor.style.backgroundColor = newCol;
           updateThreeGeometry();
           highlightLayerIn3D(idx);
         });
         colorPicker.addEventListener('change', (e) => {
           saveUndoState();
-          const newCol = e.target.value;
+          const newCol = normalizeHexColor(e.target.value);
           studioState.layers[idx].color = newCol;
-          colorLabel.style.backgroundColor = newCol;
+          const rect = colorLabel.querySelector('.swatch-rect');
+          if (rect) {
+            rect.setAttribute('fill', newCol);
+            rect.setAttribute('stroke', isLightColor(newCol) ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)');
+          }
+          const hexBadge = row.querySelector('.layer-color-hex-badge');
+          if (hexBadge) hexBadge.textContent = newCol;
           if (inspectHudColor) inspectHudColor.style.backgroundColor = newCol;
           updateThreeGeometry();
           highlightLayerIn3D(idx);

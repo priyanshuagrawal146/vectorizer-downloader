@@ -1226,16 +1226,51 @@ body {
   width: 28px;
   height: 28px;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
   flex-shrink: 0;
   cursor: pointer;
   position: relative;
   transition: transform 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  isolation: isolate !important;
+  color-scheme: light !important;
 }
 
 .layer-color-preview:hover {
   transform: scale(1.1);
+}
+
+.layer-color-preview .swatch-svg {
+  display: block;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.25));
+}
+
+.palette-swatch,
+.swatch-pill,
+.layer-color-preview,
+#inspectHudColor,
+[data-darkreader-ignore] {
+  isolation: isolate !important;
+  color-scheme: light !important;
+}
+
+.layer-color-hex-badge {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #e2e8f0;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
 }
 
 .layer-main-info {
@@ -1248,6 +1283,7 @@ body {
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 0.25rem;
+  min-width: 0;
 }
 
 .layer-name-input {
@@ -1258,7 +1294,8 @@ body {
   font-size: 0.875rem;
   padding: 0;
   outline: none;
-  width: 100%;
+  min-width: 60px;
+  flex: 1;
 }
 
 .layer-name-input:focus {

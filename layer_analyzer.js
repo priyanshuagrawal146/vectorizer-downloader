@@ -158,11 +158,30 @@ function analyzeSvgLayers(svgContent, options = {}) {
     }
   }
 
-  // Find all elements with fills (path, rect, circle, polygon, ellipse)
-  const elemRegex = /<(path|rect|circle|polygon|ellipse)\b([^>]*)\/?>/gi;
-  let match;
-  const rawElements = [];
-  let detectedBackground = null;
+  // Named HTML colors map to standard 6-digit hex
+  const NAMED_COLORS = {
+    white: '#ffffff',
+    black: '#000000',
+    red: '#ff0000',
+    green: '#008000',
+    blue: '#0000ff',
+    yellow: '#ffff00',
+    cyan: '#00ffff',
+    magenta: '#ff00ff',
+    orange: '#ffa500',
+    purple: '#800080',
+    gray: '#808080',
+    grey: '#808080',
+    silver: '#c0c0c0',
+    gold: '#ffd700',
+    navy: '#000080',
+    teal: '#008080',
+    lime: '#00ff00',
+    maroon: '#800000',
+    olive: '#808000',
+    aqua: '#00ffff',
+    fuchsia: '#ff00ff'
+  };
 
   function parseFill(attrs) {
     let fillMatch = attrs.match(/\bfill=[\"\']([^\"\']+)[\"\']/i);
@@ -175,6 +194,10 @@ function analyzeSvgLayers(svgContent, options = {}) {
     if (!fillMatch) return null;
     let fill = fillMatch[1].trim().toLowerCase();
     if (fill === 'none' || fill === 'transparent') return null;
+
+    if (NAMED_COLORS[fill]) {
+      return NAMED_COLORS[fill];
+    }
 
     const rgbMatch = fill.match(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/i);
     if (rgbMatch) {
@@ -190,10 +213,30 @@ function analyzeSvgLayers(svgContent, options = {}) {
     return fill;
   }
 
+  // Find all elements including <g> tags for fill inheritance
+  const elemRegex = /<(\/?g|path|rect|circle|polygon|ellipse)\b([^>]*)\/?>/gi;
+  let match;
+  const rawElements = [];
+  let detectedBackground = null;
+  const groupFillStack = [];
+
   while ((match = elemRegex.exec(svgContent)) !== null) {
-    const tag = match[1].toLowerCase();
-    const attrs = match[2];
-    const fill = parseFill(attrs) || '#000000';
+    const rawTag = match[1].toLowerCase();
+    const attrs = match[2] || '';
+
+    if (rawTag === 'g') {
+      const gFill = parseFill(attrs);
+      const inherited = gFill || (groupFillStack.length > 0 ? groupFillStack[groupFillStack.length - 1] : null);
+      groupFillStack.push(inherited);
+      continue;
+    } else if (rawTag === '/g') {
+      groupFillStack.pop();
+      continue;
+    }
+
+    const tag = rawTag;
+    const currentGroupFill = groupFillStack.length > 0 ? groupFillStack[groupFillStack.length - 1] : null;
+    const fill = parseFill(attrs) || currentGroupFill || '#000000';
 
     let d = '';
     if (tag === 'path') {
