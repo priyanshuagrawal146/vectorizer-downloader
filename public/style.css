@@ -1192,40 +1192,74 @@ body {
 
 .layer-row-item {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem;
-  background: rgba(0, 0, 0, 0.25);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  transition: all 0.2s ease;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.85rem 1rem;
+  background: rgba(18, 22, 34, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
 }
 
 .layer-row-item:hover {
-  border-color: rgba(255, 255, 255, 0.2);
-  background: rgba(0, 0, 0, 0.35);
+  border-color: rgba(56, 189, 248, 0.35);
+  background: rgba(24, 30, 48, 0.9);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  transform: translateY(-1px);
+}
+
+.layer-row-item.layer-row-inspected {
+  border-color: #38bdf8;
+  background: rgba(28, 38, 62, 0.95);
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.25), 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.layer-row-item.layer-row-selected {
+  border-color: #a855f7;
+  background: rgba(38, 24, 62, 0.9);
+}
+
+/* Card Header: Checkbox, Order #, Swatch, Hex, Name, and Right Actions */
+.layer-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  width: 100%;
+}
+
+.layer-card-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
 }
 
 .layer-order-num {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono, monospace);
   font-size: 0.75rem;
   font-weight: 700;
   width: 22px;
   height: 22px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: #94a3b8;
   flex-shrink: 0;
 }
 
 .layer-color-preview {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
   flex-shrink: 0;
   cursor: pointer;
@@ -1239,17 +1273,17 @@ body {
 }
 
 .layer-color-preview:hover {
-  transform: scale(1.1);
+  transform: scale(1.12);
+  border-color: #fff;
 }
 
 .layer-color-preview .swatch-canvas,
 .layer-color-preview .swatch-svg {
   display: block;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
   pointer-events: none;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.25));
 }
 
 .palette-swatch,
@@ -1267,59 +1301,162 @@ body {
   font-weight: 700;
   padding: 0.15rem 0.4rem;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: #e2e8f0;
-  letter-spacing: 0.04em;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #cbd5e1;
+  letter-spacing: 0.03em;
   flex-shrink: 0;
-}
-
-.layer-main-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.layer-name-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.25rem;
-  min-width: 0;
 }
 
 .layer-name-input {
   background: transparent;
   border: none;
-  color: #fff;
+  border-bottom: 1px solid transparent;
+  color: #f1f5f9;
   font-weight: 600;
   font-size: 0.875rem;
-  padding: 0;
+  padding: 0.1rem 0.25rem;
   outline: none;
-  min-width: 60px;
   flex: 1;
+  min-width: 60px;
+  transition: border-color 0.15s;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .layer-name-input:focus {
-  border-bottom: 1px solid var(--primary);
+  border-bottom-color: #38bdf8;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 2px;
 }
 
-.layer-role-tag,
-.layer-role-select {
-  font-size: 0.6875rem;
-  font-weight: 700;
-  padding: 0.18rem 0.45rem;
+.layer-card-right {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.layer-reorder-btns {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.btn-move {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  width: 22px;
+  height: 22px;
   border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-move:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.btn-move:disabled {
+  opacity: 0.2;
+  cursor: not-allowed;
+}
+
+.layer-tools-group {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.btn-layer-tool {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+  border-radius: 6px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.15s;
+}
+
+.btn-layer-tool:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.btn-layer-tool.btn-delete:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #f87171;
+}
+
+.btn-layer-tool.btn-merge-active,
+.btn-layer-tool.btn-combine-active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+/* Card Sub Row: Role, Thickness, Z Range, Paths */
+.layer-card-sub {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  width: 100%;
+}
+
+.layer-role-pill-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.layer-sub-label {
+  font-size: 0.65rem;
+  color: #64748b;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  white-space: nowrap;
-  outline: none;
-  transition: all 0.15s ease;
+  flex-shrink: 0;
 }
 
 .layer-role-select {
-  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.22rem 0.55rem;
+  border-radius: 6px;
+  letter-spacing: 0.02em;
+  outline: none;
   border: 1px solid rgba(255, 255, 255, 0.15);
-  background-color: #14141e;
+  background-color: #151824;
+  color: #e2e8f0;
+  cursor: pointer;
+  max-width: 160px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: all 0.15s ease;
 }
 
 .layer-role-select:hover {
@@ -1361,19 +1498,21 @@ body {
   border: 1px solid rgba(239, 68, 68, 0.45);
 }
 
-.layer-height-inputs {
+.layer-dimensions-wrap {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.45rem;
+  flex-shrink: 0;
 }
 
-.layer-mm-box, .layer-pct-box {
+.layer-mm-box {
   display: flex;
   align-items: center;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  padding: 0.15rem 0.4rem;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 0.15rem 0.35rem;
+  gap: 0.2rem;
   transition: border-color 0.2s;
 }
 
@@ -1381,23 +1520,47 @@ body {
   border-color: var(--accent-color);
 }
 
-.layer-height-mm-input, .layer-pct-input {
-  width: 50px;
+.layer-height-mm-input {
+  width: 44px;
   background: transparent;
   border: none;
   color: #fff;
-  font-size: 0.8rem;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
   font-weight: 600;
-  font-family: var(--font-mono);
   text-align: right;
   outline: none;
+  padding: 0;
 }
 
-.layer-mm-box span, .layer-unit-label {
-  font-size: 0.7rem;
-  color: var(--text-dim);
-  margin-left: 0.25rem;
-  font-family: var(--font-mono);
+.layer-unit-label {
+  font-size: 0.65rem;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.layer-z-range-badge {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 0.18rem 0.45rem;
+  border-radius: 5px;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  color: #38bdf8;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.layer-path-badge {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.65rem;
+  color: #64748b;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0.15rem 0.35rem;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .layer-mm-label {
@@ -2166,9 +2329,8 @@ body {
 
 .layer-inspect-hud {
   position: absolute;
-  top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: 22px;
+  left: 22px;
   display: flex;
   align-items: center;
   gap: 0.65rem;

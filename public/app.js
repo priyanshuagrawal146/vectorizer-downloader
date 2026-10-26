@@ -1194,43 +1194,53 @@ document.addEventListener('DOMContentLoaded', () => {
       const colorHexVal = normalizeHexColor(layer.color);
 
       row.innerHTML = `
-        <label class="layer-checkbox-container" title="Select to merge or combine">
-          <input type="checkbox" class="layer-select-checkbox" data-idx="${idx}" ${isSelected ? 'checked' : ''} />
-        </label>
-        <div class="layer-order-num">${idx + 1}</div>
-        <label class="layer-color-preview" title="Click to edit color or hover to highlight in 3D">
-          <canvas class="swatch-canvas" width="56" height="56"></canvas>
-          <input type="color" class="layer-color-picker" value="${colorHexVal}" style="opacity:0;position:absolute;pointer-events:none;" />
-        </label>
-        <div class="layer-main-info">
-          <div class="layer-name-row">
+        <div class="layer-card-header">
+          <div class="layer-card-left">
+            <label class="layer-checkbox-container" title="Select to merge or combine">
+              <input type="checkbox" class="layer-select-checkbox" data-idx="${idx}" ${isSelected ? 'checked' : ''} />
+            </label>
+            <div class="layer-order-num" title="Layer ${idx + 1}">${idx + 1}</div>
+            <label class="layer-color-preview" title="Click to edit filament color or hover to highlight in 3D">
+              <canvas class="swatch-canvas" width="56" height="56"></canvas>
+              <input type="color" class="layer-color-picker" value="${colorHexVal}" style="opacity:0;position:absolute;pointer-events:none;" />
+            </label>
             <span class="layer-color-hex-badge" title="Filament Color Hex">${colorHexVal}</span>
-            <input type="text" class="layer-name-input" value="${layer.name}" data-idx="${idx}" />
-            ${layer.isCombined ? '<span class="badge badge-combine" title="Combined layer with hollow cutouts for overlapping shapes">⧉ Combined</span>' : ''}
-            <select class="layer-role-select ${roleClass}" data-idx="${idx}" title="Set Extrusion Role">
-              <option value="base" ${layer.role === 'base' ? 'selected' : ''}>Base (Foundation)</option>
-              <option value="top" ${(layer.role === 'top' || layer.role === 'raised') ? 'selected' : ''}>Raised on Top (Solid Plate Underneath)</option>
-              <option value="cutout" ${layer.role === 'cutout' ? 'selected' : ''}>Cutout / Inset (Hollow Hole)</option>
-              <option value="mid" ${layer.role === 'mid' ? 'selected' : ''}>Mid (Artwork Plate)</option>
+            <input type="text" class="layer-name-input" value="${layer.name}" data-idx="${idx}" title="Click to rename layer" />
+            ${layer.isCombined ? '<span class="badge badge-combine" title="Combined layer with hollow cutouts">⧉</span>' : ''}
+          </div>
+          <div class="layer-card-right">
+            <div class="layer-reorder-btns">
+              <button class="btn-move btn-move-up" data-idx="${idx}" ${idx === 0 ? 'disabled' : ''} title="Move Earlier (Lower Z)">▲</button>
+              <button class="btn-move btn-move-down" data-idx="${idx}" ${idx === studioState.layers.length - 1 ? 'disabled' : ''} title="Move Later (Higher Z)">▼</button>
+            </div>
+            <div class="layer-tools-group">
+              <button class="btn-layer-tool btn-merge ${isMergeOpen ? 'btn-merge-active' : ''}" data-idx="${idx}" title="Merge into another layer (Solid Union)" type="button">⇄</button>
+              <button class="btn-layer-tool btn-combine ${isCombineOpen ? 'btn-combine-active' : ''}" data-idx="${idx}" title="Combine into another layer (Hollow Cutout)" type="button">⧉</button>
+              <button class="btn-layer-tool btn-delete" data-idx="${idx}" title="Delete layer" type="button">🗑️</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="layer-card-sub">
+          <div class="layer-role-pill-wrap">
+            <span class="layer-sub-label">Print:</span>
+            <select class="layer-role-select ${roleClass}" data-idx="${idx}" title="Set print behavior">
+              <option value="base" ${layer.role === 'base' ? 'selected' : ''}>Base Foundation</option>
+              <option value="top" ${(layer.role === 'top' || layer.role === 'raised') ? 'selected' : ''}>Raised on Top</option>
+              <option value="cutout" ${layer.role === 'cutout' ? 'selected' : ''}>Cutout (Hole)</option>
+              <option value="mid" ${layer.role === 'mid' ? 'selected' : ''}>Artwork Plate</option>
             </select>
           </div>
-          <div class="layer-height-inputs">
-            <div class="layer-mm-box" title="${idx === 0 ? 'Base foundation thickness (auto-adjusts to total)' : 'Layer thickness (editable in mm, min 0.1 mm)'}">
+
+          <div class="layer-dimensions-wrap">
+            <div class="layer-mm-box" title="${idx === 0 ? 'Base foundation thickness' : 'Layer thickness (editable in mm)'}">
+              <span class="layer-sub-label">Thick:</span>
               <input type="number" class="layer-height-mm-input" value="${thicknessMm}" min="0.1" max="50" step="0.1" data-idx="${idx}" />
               <span class="layer-unit-label">mm</span>
             </div>
-            <span class="layer-z-range-badge" title="Print height range along Z axis">Z: ${zStart.toFixed(2)} – ${zEnd.toFixed(2)} mm</span>
-            <span style="font-size:0.75rem; color:var(--text-dim); margin-left:auto;">${(layer.paths ? layer.paths.length : 0) + (layer.cutoutPaths ? layer.cutoutPaths.length : 0)} paths</span>
+            <span class="layer-z-range-badge" title="Print height range along Z axis">Z: ${zStart.toFixed(2)}–${zEnd.toFixed(2)} mm</span>
+            <span class="layer-path-badge" title="${(layer.paths ? layer.paths.length : 0) + (layer.cutoutPaths ? layer.cutoutPaths.length : 0)} vector paths">${(layer.paths ? layer.paths.length : 0) + (layer.cutoutPaths ? layer.cutoutPaths.length : 0)}p</span>
           </div>
-        </div>
-        <div class="layer-tools-group">
-          <button class="btn-layer-tool btn-merge ${isMergeOpen ? 'btn-merge-active' : ''}" data-idx="${idx}" title="Merge into another layer (Solid Union)" type="button">⇄</button>
-          <button class="btn-layer-tool btn-combine ${isCombineOpen ? 'btn-combine-active' : ''}" data-idx="${idx}" title="Combine into another layer (Hollow / Cutout overlap)" type="button">⧉</button>
-          <button class="btn-layer-tool btn-delete" data-idx="${idx}" title="Delete layer" type="button">🗑️</button>
-        </div>
-        <div class="layer-reorder-btns">
-          <button class="btn-move btn-move-up" data-idx="${idx}" ${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
-          <button class="btn-move btn-move-down" data-idx="${idx}" ${idx === studioState.layers.length - 1 ? 'disabled' : ''} title="Move Down">▼</button>
         </div>
       `;
 
