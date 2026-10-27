@@ -1965,7 +1965,8 @@ document.addEventListener('DOMContentLoaded', () => {
           const geom = new THREE.ExtrudeGeometry(shape, {
             depth: ownExtrudeDepth,
             bevelEnabled: false,
-            steps: 1
+            steps: 1,
+            curveSegments: 6
           });
           const mesh = new THREE.Mesh(geom, mat);
           mesh.position.z = ownZStart;
@@ -2044,7 +2045,8 @@ document.addEventListener('DOMContentLoaded', () => {
           const geom = new THREE.ExtrudeGeometry(shape, {
             depth: ownExtrudeDepth,
             bevelEnabled: false,
-            steps: 1
+            steps: 1,
+            curveSegments: 6
           });
           const mesh = new THREE.Mesh(geom, mat);
           mesh.position.z = ownZStart;
@@ -2299,7 +2301,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const triangleIndices = [];
 
       const getVertIndex = (v) => {
-        const key = `${v.x.toFixed(4)},${v.y.toFixed(4)},${v.z.toFixed(4)}`;
+        // Round to 3 decimal places (1 micron) to weld near-duplicate vertices and reduce memory
+        const key = `${v.x.toFixed(3)},${v.y.toFixed(3)},${v.z.toFixed(3)}`;
         if (vertMap.has(key)) {
           return vertMap.get(key);
         }
@@ -2322,21 +2325,19 @@ document.addEventListener('DOMContentLoaded', () => {
       let vertsXml = '';
       for (let v = 0; v < verticesList.length; v++) {
         const vert = verticesList[v];
-        vertsXml += `        <vertex x="${vert.x.toFixed(4)}" y="${vert.y.toFixed(4)}" z="${vert.z.toFixed(4)}"/>\n`;
+        vertsXml += `<vertex x="${parseFloat(vert.x.toFixed(3))}" y="${parseFloat(vert.y.toFixed(3))}" z="${parseFloat(vert.z.toFixed(3))}"/>\n`;
       }
 
       let trisXml = '';
       for (let t = 0; t < triangleIndices.length; t++) {
         const [i1, i2, i3] = triangleIndices[t];
-        trisXml += `        <triangle v1="${i1}" v2="${i2}" v3="${i3}"/>\n`;
+        trisXml += `<triangle v1="${i1}" v2="${i2}" v3="${i3}"/>\n`;
       }
 
       objectsXml += `    <object id="${objId}" type="model" name="${spec.cleanName}" pid="1" pindex="${idx}">
       <mesh>
-        <vertices>
-${vertsXml}        </vertices>
-        <triangles>
-${trisXml}        </triangles>
+        <vertices>\n${vertsXml}        </vertices>
+        <triangles>\n${trisXml}        </triangles>
       </mesh>
     </object>\n`;
 
@@ -2357,7 +2358,11 @@ ${buildXml}  </build>
     zip.file('_rels/.rels', rels);
     zip.file('3D/3dmodel.model', modelXml);
 
-    return await zip.generateAsync({ type: 'blob' });
+    return await zip.generateAsync({
+      type: 'blob',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 }
+    });
   }
 
   async function triggerExport(format) {
@@ -2492,7 +2497,11 @@ ${buildXml}  </build>
       });
       packageZip.file('Filament_Swap_Guide.txt', guideBlob);
 
-      const packageZipBlob = await packageZip.generateAsync({ type: 'blob' });
+      const packageZipBlob = await packageZip.generateAsync({
+        type: 'blob',
+        compression: 'DEFLATE',
+        compressionOptions: { level: 6 }
+      });
       const packageZipFilename = `${jobName}_BambuLab_Package.zip`;
       const packageZipUrl = URL.createObjectURL(packageZipBlob);
 

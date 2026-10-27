@@ -167,10 +167,11 @@ def process_nameplate_blender(config_path):
         step_thick_m = step_thickness_mm / 1000.0
         z_start_m = z_start_mm / 1000.0
 
-        # Set 2D fill mode and clean base holes if base foundation
+        # Set 2D fill mode, optimize curve resolution, and clean base holes if base foundation
         for o in new_objects:
             o.data.dimensions = '2D'
             o.data.fill_mode = 'BOTH'
+            o.data.resolution_u = 6
             if is_base:
                 splines = list(o.data.splines)
                 if splines:
