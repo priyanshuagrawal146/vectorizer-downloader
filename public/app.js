@@ -1164,7 +1164,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const totalDisplayed = studioState.layers.length + (studioState.raisedTextDetected ? 1 : 0);
     layerCountBadge.textContent = `${totalDisplayed} Layers`;
 
-    let runningZ = 0;
+    const baseLyr = studioState.layers.find(l => l.role === 'base') || studioState.layers[0];
+    const baseThick = Math.max(0.10, (baseLyr && baseLyr.thicknessMm !== undefined) ? parseFloat(baseLyr.thicknessMm) : (studioState.layers[0]?.thicknessMm || 7.00));
+
+    let runningZ = baseThick;
     studioState.layers.forEach((layer, idx) => {
       const isSelected = studioState.selectedLayerIndices.has(idx);
       const isInspected = (studioState.inspectedLayerIdx === idx);
@@ -1181,9 +1184,16 @@ document.addEventListener('DOMContentLoaded', () => {
         layer.thicknessMm = Math.max(0.10, parseFloat(layer.thicknessMm));
       }
       const thicknessMm = parseFloat(layer.thicknessMm).toFixed(2);
-      const zStart = runningZ;
-      const zEnd = runningZ + parseFloat(thicknessMm);
-      runningZ = zEnd;
+      const isBase = (layer.role === 'base' || idx === 0);
+      let zStart, zEnd;
+      if (isBase) {
+        zStart = 0;
+        zEnd = baseThick;
+      } else {
+        zStart = baseThick;
+        runningZ += parseFloat(thicknessMm);
+        zEnd = runningZ;
+      }
       layer.zStartMm = zStart;
       layer.zEndMm = zEnd;
 
@@ -1879,19 +1889,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const baseLayer = studioState.layers.find(l => l.role === 'base') || studioState.layers[0];
     const baseThickness = Math.max(0.10, (baseLayer && baseLayer.thicknessMm !== undefined) ? baseLayer.thicknessMm : (studioState.layers[0]?.thicknessMm || 7.00));
 
-    let runningZ = 0;
+    let runningTopZ = baseThickness;
     studioState.layers.forEach((layer, idx) => {
       const isBase = (layer.role === 'base' || idx === 0);
       const layerStepThick = isBase 
         ? baseThickness 
         : Math.max(0.10, layer.thicknessMm !== undefined ? layer.thicknessMm : 1.00);
 
-      const ownZStart = runningZ;
-      const ownExtrudeDepth = layerStepThick;
-      runningZ += layerStepThick;
+      let ownZStart, ownExtrudeDepth;
+      if (isBase) {
+        ownZStart = 0;
+        ownExtrudeDepth = baseThickness;
+      } else {
+        // Option 1: Upper layers anchor flush to base plate (Z = baseThickness)
+        // and extrude continuously to their unique tiered top height!
+        ownZStart = baseThickness;
+        runningTopZ += layerStepThick;
+        ownExtrudeDepth = Math.max(0.20, runningTopZ - baseThickness);
+      }
 
       const layerGroup = new THREE.Group();
-      layerGroup.userData = { baseZ: ownZStart, layerIndex: idx };
+      layerGroup.userData = { baseZ: 0, layerIndex: idx };
 
       let matColor = layer.color;
       if (matColor === '#000000' || matColor === '#090808' || matColor === '#090908' || matColor === '#101010') {
@@ -1900,20 +1918,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (isBase) {
         // 1. Base Layer: extrude foundation plate from Z = 0 to baseThickness
-        // Always build base paths using all layers when solidBase is on,
-        // so the base is 100% solid foundation under all layers.
+        // Strictly use base outline paths — zero upper paths injected to keep base infill 100% clean
         let basePathsHtml = '';
-        if (studioState.solidBase) {
-          studioState.layers.forEach(l => {
-            (l.paths || []).forEach(rawD => {
-              basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
-            });
-          });
-        } else {
-          (layer.paths || []).forEach(rawD => {
-            basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
-          });
-        }
+        (layer.paths || []).forEach(rawD => {
+          basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
+        });
         const baseSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
           <g fill="${layer.color}">${basePathsHtml}</g>
         </svg>`;
@@ -1938,7 +1947,10 @@ document.addEventListener('DOMContentLoaded', () => {
         baseSvgData.paths.forEach(svgPath => {
           const shapes = THREE.SVGLoader.createShapes(svgPath);
           shapes.forEach(shape => {
-            // Preserve shape.holes so pre-existing hollows (keychain holes, frame centers, letter counters) remain 100% hollow!
+            // Clear inner puzzle cutout holes when Solid Base is on so backing is 100% solid
+            if (studioState.solidBase) {
+              shape.holes = [];
+            }
             const shapePts = shape.getPoints();
             if (shapePts && shapePts.length >= 3 && cutoutShapes.length > 0) {
               const shapeBox = new THREE.Box2().setFromPoints(shapePts);
@@ -1974,25 +1986,11 @@ document.addEventListener('DOMContentLoaded', () => {
           layerGroup.add(mesh);
         });
       } else {
-        // 2. Upper layers: anchored to base plate and extruded up to cumulative top height (no floating gaps)
+        // 2. Upper layers: anchored flush to base plate and extruded up to distinct tiered top height
         let ownPathsHtml = '';
         (layer.paths || []).forEach(rawD => {
           ownPathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
         });
-
-        // Auto-solidify underneath: if this layer is not cutout and studioState.autoSolidifyPlates is enabled,
-        // include paths from all upper layers that are raised on top (not cutout),
-        // so this underlying plate becomes a 100% solid surface without hollow holes under the raised text/artwork
-        if (studioState.autoSolidifyPlates !== false && layer.role !== 'cutout') {
-          for (let upperIdx = idx + 1; upperIdx < studioState.layers.length; upperIdx++) {
-            const upperLayer = studioState.layers[upperIdx];
-            if (upperLayer && upperLayer.role !== 'cutout') {
-              (upperLayer.paths || []).forEach(rawD => {
-                ownPathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
-              });
-            }
-          }
-        }
 
         const ownSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
           <g fill="${layer.color}">${ownPathsHtml}</g>
@@ -2461,7 +2459,7 @@ ${buildXml}  </build>
 
       // Extract triangles for each layer
       const layerPrintSpecs = [];
-      let runningZ = 0;
+      let runningTopZ = baseThickness;
 
       studioState.layers.forEach((layer, idx) => {
         const isBase = (layer.role === 'base' || idx === 0);
@@ -2476,11 +2474,17 @@ ${buildXml}  </build>
           triangles.push([indexedMesh.verticesList[i1], indexedMesh.verticesList[i2], indexedMesh.verticesList[i3]]);
         }
 
-        const zStart = runningZ;
-        const zEnd = runningZ + thickMm;
+        let zStart, zEnd;
+        if (isBase) {
+          zStart = 0;
+          zEnd = baseThickness;
+        } else {
+          zStart = baseThickness;
+          runningTopZ += thickMm;
+          zEnd = runningTopZ;
+        }
         const pauseStart = zStart;
         const pauseEnd = zEnd;
-        runningZ = zEnd;
 
         const rawName = layer.name || `Layer ${idx + 1}`;
         const cleanName = `${String(idx + 1).padStart(2, '0')}_${rawName.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
