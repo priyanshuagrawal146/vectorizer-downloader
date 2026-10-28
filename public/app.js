@@ -2267,35 +2267,39 @@ document.addEventListener('DOMContentLoaded', () => {
     return new Blob([arrayBuffer], { type: 'model/stl' });
   }
 
-  async function generateBambu3mf(layerSpecs, JSZipClass) {
+  async function generateBambu3mf(layerSpecs, JSZipClass, jobName = 'Nameplate') {
     const zip = new JSZipClass();
 
     const contentTypes = `<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
+  <Default Extension="config" ContentType="application/xml"/>
 </Types>`;
 
     const rels = `<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
+  <Relationship Target="/Metadata/model_settings.config" Id="rel1" Type="http://schemas.bambulab.com/package/2021/model-settings"/>
+  <Relationship Target="/Metadata/project_settings.config" Id="rel2" Type="http://schemas.bambulab.com/package/2021/project-settings"/>
 </Relationships>`;
 
-    let colorsXml = '';
-    layerSpecs.forEach(spec => {
-      let hex = (spec.color || '#888888').replace('#', '');
-      if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
-      if (hex.length !== 6) hex = '888888';
-      colorsXml += `    <m:color color="#${hex.toUpperCase()}FF"/>\n`;
-    });
-
+    const cleanJobName = (jobName || 'Nameplate').replace(/[^a-zA-Z0-9_-]/g, '_');
     let objectsXml = '';
-    let buildXml = '';
+    let componentsXml = '';
+    let partsXml = '';
+    const filamentColors = [];
 
     layerSpecs.forEach((spec, idx) => {
       const objId = idx + 2;
-      const triangles = spec.triangles || [];
+      const extruderSlot = idx + 1; // Strict layer order: Layer 1 (bottom) = Filament 1, Layer 2 = Filament 2, etc.
 
+      let hex = (spec.color || '#888888').replace('#', '');
+      if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+      if (hex.length !== 6) hex = '888888';
+      filamentColors.push('#' + hex.toUpperCase());
+
+      const triangles = spec.triangles || [];
       const verticesList = [];
       const triangleIndices = [];
 
@@ -2319,29 +2323,58 @@ document.addEventListener('DOMContentLoaded', () => {
         trisXml += `<triangle v1="${i1}" v2="${i2}" v3="${i3}"/>\n`;
       }
 
-      objectsXml += `    <object id="${objId}" type="model" name="${spec.cleanName}" pid="1" pindex="${idx}">
+      objectsXml += `    <object id="${objId}" type="model" name="${spec.cleanName}">
       <mesh>
         <vertices>\n${vertsXml}        </vertices>
         <triangles>\n${trisXml}        </triangles>
       </mesh>
     </object>\n`;
 
-      buildXml += `    <item objectid="${objId}"/>\n`;
+      componentsXml += `      <component objectid="${objId}"/>\n`;
+
+      partsXml += `    <part id="${objId}" subtype="normal_part">
+      <metadata key="name" value="${spec.cleanName}"/>
+      <metadata key="extruder" value="${extruderSlot}"/>
+    </part>\n`;
     });
 
     const modelXml = `<?xml version="1.0" encoding="UTF-8"?>
-<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
   <resources>
-    <m:colorgroup id="1">
-${colorsXml}    </m:colorgroup>
-${objectsXml}  </resources>
+${objectsXml}    <object id="1" type="model" name="${cleanJobName}">
+      <components>
+${componentsXml}      </components>
+    </object>
+  </resources>
   <build>
-${buildXml}  </build>
+    <item objectid="1"/>
+  </build>
 </model>`;
+
+    const modelSettingsXml = `<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <object id="1">
+    <metadata key="name" value="${cleanJobName}"/>
+    <metadata key="extruder" value="1"/>
+${partsXml}  </object>
+  <plate>
+    <metadata key="plater_id" value="1"/>
+    <metadata key="plater_name" value=""/>
+    <metadata key="locked" value="false"/>
+  </plate>
+</config>`;
+
+    const projectSettingsJson = JSON.stringify({
+      filament_colour: filamentColors,
+      filament_type: filamentColors.map(() => 'PLA'),
+      filament_vendor: filamentColors.map(() => 'Bambu Lab')
+    }, null, 2);
 
     zip.file('[Content_Types].xml', contentTypes);
     zip.file('_rels/.rels', rels);
     zip.file('3D/3dmodel.model', modelXml);
+    zip.file('Metadata/model_settings.config', modelSettingsXml);
+    zip.file('Metadata/project_settings.config', projectSettingsJson);
 
     return await zip.generateAsync({
       type: 'blob',
@@ -2439,7 +2472,7 @@ ${buildXml}  </build>
       const combinedStlUrl = URL.createObjectURL(combinedStlBlob);
 
       // 3. Generate Native BambuLab .3MF Project
-      const threeMfBlob = await generateBambu3mf(layerPrintSpecs, window.JSZip);
+      const threeMfBlob = await generateBambu3mf(layerPrintSpecs, window.JSZip, jobName);
       const threeMfFilename = `${jobName}_150mm.3mf`;
       const threeMfUrl = URL.createObjectURL(threeMfBlob);
 

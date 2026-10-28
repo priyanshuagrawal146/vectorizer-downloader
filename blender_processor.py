@@ -23,36 +23,42 @@ def hex_to_linear_rgb(hex_str):
 
     return (to_linear(r), to_linear(g), to_linear(b), 1.0)
 
-def export_bambu_3mf(filepath, layer_specs):
-    """Export native multi-part .3mf project for Bambu Studio with pre-assigned colors."""
+def export_bambu_3mf(filepath, layer_specs, job_name="Nameplate"):
+    """Export native multi-part .3mf project for Bambu Studio with layer-wise extruder assignments."""
     import xml.etree.ElementTree as ET
+    import zipfile
+    import json
+    import re
+    
+    clean_job_name = re.sub(r'[^a-zA-Z0-9_-]', '_', job_name)
     root = ET.Element('model', {
         'unit': 'millimeter',
         'xml:lang': 'en-US',
-        'xmlns': 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02',
-        'xmlns:m': 'http://schemas.microsoft.com/3dmanufacturing/material/2015/02'
+        'xmlns': 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02'
     })
     
     resources = ET.SubElement(root, 'resources')
-    colorgroup = ET.SubElement(resources, '{http://schemas.microsoft.com/3dmanufacturing/material/2015/02}colorgroup', {'id': '1'})
-    for spec in layer_specs:
+    components_elem = ET.Element('components')
+    
+    filament_colors = []
+    parts_xml = []
+    
+    for idx, spec in enumerate(layer_specs):
+        obj_id = idx + 2
+        extruder_slot = idx + 1
+        
         hex_col = spec['color'].lstrip('#')
         if len(hex_col) == 3: hex_col = ''.join([c*2 for c in hex_col])
         if len(hex_col) != 6: hex_col = 'CCCCCC'
-        ET.SubElement(colorgroup, '{http://schemas.microsoft.com/3dmanufacturing/material/2015/02}color', {'color': f'#{hex_col}FF'})
-
-    build = ET.SubElement(root, 'build')
-    obj_id = 2
-    for idx, spec in enumerate(layer_specs):
+        filament_colors.append(f'#{hex_col.upper()}')
+        
         obj = spec['obj']
         mesh = obj.data
         
         obj_elem = ET.SubElement(resources, 'object', {
             'id': str(obj_id),
             'type': 'model',
-            'name': spec['clean_name'],
-            'pid': '1',
-            'pindex': str(idx)
+            'name': spec['clean_name']
         })
         mesh_elem = ET.SubElement(obj_elem, 'mesh')
         verts_elem = ET.SubElement(mesh_elem, 'vertices')
@@ -74,25 +80,65 @@ def export_bambu_3mf(filepath, layer_specs):
                     'v3': str(poly.vertices[i + 1])
                 })
                 
-        ET.SubElement(build, 'item', {'objectid': str(obj_id)})
-        obj_id += 1
+        ET.SubElement(components_elem, 'component', {'objectid': str(obj_id)})
+        parts_xml.append(f'''    <part id="{obj_id}" subtype="normal_part">
+      <metadata key="name" value="{spec['clean_name']}"/>
+      <metadata key="extruder" value="{extruder_slot}"/>
+    </part>''')
+
+    # Root assembly object
+    root_assembly = ET.SubElement(resources, 'object', {
+        'id': '1',
+        'type': 'model',
+        'name': clean_job_name
+    })
+    root_assembly.append(components_elem)
+
+    build = ET.SubElement(root, 'build')
+    ET.SubElement(build, 'item', {'objectid': '1'})
 
     content_types = '''<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
+  <Default Extension="config" ContentType="application/xml"/>
 </Types>'''
 
     rels = '''<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
+  <Relationship Target="/Metadata/model_settings.config" Id="rel1" Type="http://schemas.bambulab.com/package/2021/model-settings"/>
+  <Relationship Target="/Metadata/project_settings.config" Id="rel2" Type="http://schemas.bambulab.com/package/2021/project-settings"/>
 </Relationships>'''
+
+    parts_joined = '\n'.join(parts_xml)
+    model_settings = f'''<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <object id="1">
+    <metadata key="name" value="{clean_job_name}"/>
+    <metadata key="extruder" value="1"/>
+{parts_joined}
+  </object>
+  <plate>
+    <metadata key="plater_id" value="1"/>
+    <metadata key="plater_name" value=""/>
+    <metadata key="locked" value="false"/>
+  </plate>
+</config>'''
+
+    project_settings = json.dumps({
+        "filament_colour": filament_colors,
+        "filament_type": ["PLA"] * len(filament_colors),
+        "filament_vendor": ["Bambu Lab"] * len(filament_colors)
+    }, indent=2)
 
     model_xml = ET.tostring(root, encoding='utf-8', xml_declaration=True)
     with zipfile.ZipFile(filepath, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr('[Content_Types].xml', content_types)
         zf.writestr('_rels/.rels', rels)
         zf.writestr('3D/3dmodel.model', model_xml)
+        zf.writestr('Metadata/model_settings.config', model_settings)
+        zf.writestr('Metadata/project_settings.config', project_settings)
     print(f"Successfully generated BambuLab 3MF file: {filepath}")
 
 def process_nameplate_blender(config_path):
@@ -390,7 +436,7 @@ def process_nameplate_blender(config_path):
     three_mf_filename = f"{job_name}_150mm.3mf"
     three_mf_path = os.path.join(output_dir, three_mf_filename)
     try:
-        export_bambu_3mf(three_mf_path, layer_print_specs)
+        export_bambu_3mf(three_mf_path, layer_print_specs, job_name=job_name)
     except Exception as e:
         print(f"Warning: 3MF export encountered: {e}")
 
