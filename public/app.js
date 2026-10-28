@@ -1167,7 +1167,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const baseLyr = studioState.layers.find(l => l.role === 'base') || studioState.layers[0];
     const baseThick = Math.max(0.10, (baseLyr && baseLyr.thicknessMm !== undefined) ? parseFloat(baseLyr.thicknessMm) : (studioState.layers[0]?.thicknessMm || 7.00));
 
-    let runningZ = baseThick;
+    let runningZ = 0;
     studioState.layers.forEach((layer, idx) => {
       const isSelected = studioState.selectedLayerIndices.has(idx);
       const isInspected = (studioState.inspectedLayerIdx === idx);
@@ -1183,17 +1183,12 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         layer.thicknessMm = Math.max(0.10, parseFloat(layer.thicknessMm));
       }
-      const thicknessMm = parseFloat(layer.thicknessMm).toFixed(2);
       const isBase = (layer.role === 'base' || idx === 0);
-      let zStart, zEnd;
-      if (isBase) {
-        zStart = 0;
-        zEnd = baseThick;
-      } else {
-        zStart = baseThick;
-        runningZ += parseFloat(thicknessMm);
-        zEnd = runningZ;
-      }
+      const stepThick = isBase ? baseThick : parseFloat(layer.thicknessMm);
+      const thicknessMm = stepThick.toFixed(2);
+      const zStart = runningZ;
+      const zEnd = runningZ + stepThick;
+      runningZ = zEnd;
       layer.zStartMm = zStart;
       layer.zEndMm = zEnd;
 
@@ -1889,27 +1884,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const baseLayer = studioState.layers.find(l => l.role === 'base') || studioState.layers[0];
     const baseThickness = Math.max(0.10, (baseLayer && baseLayer.thicknessMm !== undefined) ? baseLayer.thicknessMm : (studioState.layers[0]?.thicknessMm || 7.00));
 
-    let runningTopZ = baseThickness;
+    let runningZ = 0;
     studioState.layers.forEach((layer, idx) => {
       const isBase = (layer.role === 'base' || idx === 0);
       const layerStepThick = isBase 
         ? baseThickness 
         : Math.max(0.10, layer.thicknessMm !== undefined ? layer.thicknessMm : 1.00);
 
-      let ownZStart, ownExtrudeDepth;
-      if (isBase) {
-        ownZStart = 0;
-        ownExtrudeDepth = baseThickness;
-      } else {
-        // Option 1: Upper layers anchor flush to base plate (Z = baseThickness)
-        // and extrude continuously to their unique tiered top height!
-        ownZStart = baseThickness;
-        runningTopZ += layerStepThick;
-        ownExtrudeDepth = Math.max(0.20, runningTopZ - baseThickness);
-      }
+      const ownZStart = runningZ;
+      const ownExtrudeDepth = layerStepThick;
+      runningZ += layerStepThick;
 
       const layerGroup = new THREE.Group();
-      layerGroup.userData = { baseZ: 0, layerIndex: idx };
+      layerGroup.userData = { baseZ: ownZStart, layerIndex: idx };
 
       let matColor = layer.color;
       if (matColor === '#000000' || matColor === '#090808' || matColor === '#090908' || matColor === '#101010') {
@@ -1981,16 +1968,27 @@ document.addEventListener('DOMContentLoaded', () => {
             curveSegments: 6
           });
           const mesh = new THREE.Mesh(geom, mat);
-          mesh.position.z = ownZStart;
+          mesh.position.z = 0;
           mesh.castShadow = true; mesh.receiveShadow = true;
           layerGroup.add(mesh);
         });
       } else {
-        // 2. Upper layers: anchored flush to base plate and extruded up to distinct tiered top height
+        // 2. Upper layers: sequential heights along Z, supported underneath so nothing hangs in air
         let ownPathsHtml = '';
         (layer.paths || []).forEach(rawD => {
           ownPathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
         });
+
+        if (studioState.autoSolidifyPlates !== false && layer.role !== 'cutout') {
+          for (let upperIdx = idx + 1; upperIdx < studioState.layers.length; upperIdx++) {
+            const upperLayer = studioState.layers[upperIdx];
+            if (upperLayer && upperLayer.role !== 'cutout') {
+              (upperLayer.paths || []).forEach(rawD => {
+                ownPathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
+              });
+            }
+          }
+        }
 
         const ownSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
           <g fill="${layer.color}">${ownPathsHtml}</g>
@@ -2047,7 +2045,7 @@ document.addEventListener('DOMContentLoaded', () => {
             curveSegments: 6
           });
           const mesh = new THREE.Mesh(geom, mat);
-          mesh.position.z = ownZStart;
+          mesh.position.z = 0;
           mesh.castShadow = true; mesh.receiveShadow = true;
           layerGroup.add(mesh);
         });
@@ -2062,7 +2060,7 @@ document.addEventListener('DOMContentLoaded', () => {
       layerGroup.position.set(-totalW_mm / 2, (svgH * scale) / 2, 0);
 
       layerGroup.userData = {
-        baseZ: 0,
+        baseZ: ownZStart,
         layerIndex: idx,
         name: layer.name
       };
@@ -2347,15 +2345,16 @@ document.addEventListener('DOMContentLoaded', () => {
   <Relationship Target="/Metadata/project_settings.config" Id="rel2" Type="http://schemas.bambulab.com/package/2021/project-settings"/>
 </Relationships>`;
 
-    let objectsXml = '';
-    let buildXml = '';
-    let modelSettingsXml = `<?xml version="1.0" encoding="UTF-8"?>
-<config>
-`;
+    // Object ID 1 = Assembly container item placed on plate
+    // Object ID 2, 3, 4... = Individual mesh components
+    const assemblyObjId = 1;
+    let meshObjectsXml = '';
+    let componentsXml = '';
+    let modelPartsXml = '';
     const filamentColors = [];
 
     layerSpecs.forEach((spec, idx) => {
-      const objId = idx + 2;
+      const compObjId = idx + 2;
       const extruderSlot = idx + 1; // Strict layer order: Layer 1 (bottom) = Filament 1, Layer 2 = Filament 2, etc.
 
       let hex = (spec.color || '#888888').replace('#', '');
@@ -2378,26 +2377,33 @@ document.addEventListener('DOMContentLoaded', () => {
         trisXml += `<triangle v1="${i1}" v2="${i2}" v3="${i3}"/>\n`;
       }
 
-      objectsXml += `    <object id="${objId}" type="model" name="${spec.cleanName}">
+      meshObjectsXml += `    <object id="${compObjId}" type="model" name="${spec.cleanName}">
       <mesh>
         <vertices>\n${vertsXml}        </vertices>
         <triangles>\n${trisXml}        </triangles>
       </mesh>
     </object>\n`;
 
-      buildXml += `    <item objectid="${objId}"/>\n`;
+      componentsXml += `        <component objectid="${compObjId}" transform="1 0 0 0 1 0 0 0 1 0 0 0"/>\n`;
 
-      modelSettingsXml += `  <object id="${objId}">
-    <metadata key="name" value="${spec.cleanName}"/>
-    <metadata key="extruder" value="${extruderSlot}"/>
-    <part id="1" subtype="normal_part">
+      modelPartsXml += `    <part id="${compObjId}" subtype="normal_part">
       <metadata key="name" value="${spec.cleanName}"/>
       <metadata key="extruder" value="${extruderSlot}"/>
-    </part>
-  </object>\n`;
+    </part>\n`;
     });
 
-    modelSettingsXml += `  <plate>
+    const assemblyObjectXml = `    <object id="${assemblyObjId}" type="model" name="${jobName}">
+      <components>
+${componentsXml}      </components>
+    </object>\n`;
+
+    const modelSettingsXml = `<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <object id="${assemblyObjId}">
+    <metadata key="name" value="${jobName}"/>
+    <metadata key="extruder" value="1"/>
+${modelPartsXml}  </object>
+  <plate>
     <metadata key="plater_id" value="1"/>
     <metadata key="plater_name" value=""/>
     <metadata key="locked" value="false"/>
@@ -2407,9 +2413,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const modelXml = `<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
   <resources>
-${objectsXml}  </resources>
+${meshObjectsXml}${assemblyObjectXml}  </resources>
   <build>
-${buildXml}  </build>
+    <item objectid="${assemblyObjId}"/>
+  </build>
 </model>`;
 
     const projectSettingsJson = JSON.stringify({
@@ -2444,9 +2451,9 @@ ${buildXml}  </build>
         throw new Error('3D Viewport is still initializing. Please wait a moment and try again.');
       }
 
-      // Temporarily reset explode offset so printed layers sit solidly on each other
+      // Temporarily reset explode offset so printed layers sit at their true manufacturing Z elevation
       threeLayerMeshes.forEach(group => {
-        group.position.z = 0;
+        group.position.z = group.userData.baseZ || 0;
         group.updateMatrixWorld(true);
       });
       threeRootGroup.updateMatrixWorld(true);
@@ -2459,7 +2466,7 @@ ${buildXml}  </build>
 
       // Extract triangles for each layer
       const layerPrintSpecs = [];
-      let runningTopZ = baseThickness;
+      let runningZ = 0;
 
       studioState.layers.forEach((layer, idx) => {
         const isBase = (layer.role === 'base' || idx === 0);
@@ -2474,17 +2481,11 @@ ${buildXml}  </build>
           triangles.push([indexedMesh.verticesList[i1], indexedMesh.verticesList[i2], indexedMesh.verticesList[i3]]);
         }
 
-        let zStart, zEnd;
-        if (isBase) {
-          zStart = 0;
-          zEnd = baseThickness;
-        } else {
-          zStart = baseThickness;
-          runningTopZ += thickMm;
-          zEnd = runningTopZ;
-        }
+        const zStart = runningZ;
+        const zEnd = runningZ + thickMm;
         const pauseStart = zStart;
         const pauseEnd = zEnd;
+        runningZ = zEnd;
 
         const rawName = layer.name || `Layer ${idx + 1}`;
         const cleanName = `${String(idx + 1).padStart(2, '0')}_${rawName.replace(/[^a-zA-Z0-9_-]/g, '_')}`;

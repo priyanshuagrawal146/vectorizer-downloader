@@ -40,9 +40,15 @@ def export_bambu_3mf(filepath, layer_specs, job_name="Nameplate"):
     resources = ET.SubElement(root, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}resources')
     build = ET.SubElement(root, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}build')
     
-    filament_colors = []
-    objects_cfg = []
-    
+    assembly_obj_id = 1
+    assembly_obj = ET.SubElement(resources, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}object', {
+        'id': str(assembly_obj_id),
+        'type': 'model',
+        'name': clean_job_name
+    })
+    assembly_components = ET.SubElement(assembly_obj, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}components')
+
+    parts_cfg = []
     for idx, spec in enumerate(layer_specs):
         obj_id = idx + 2
         extruder_slot = idx + 1
@@ -80,15 +86,18 @@ def export_bambu_3mf(filepath, layer_specs, job_name="Nameplate"):
                     'v3': str(poly.vertices[i + 1])
                 })
                 
-        ET.SubElement(build, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}item', {'objectid': str(obj_id)})
-        objects_cfg.append(f'''  <object id="{obj_id}">
-    <metadata key="name" value="{spec['clean_name']}"/>
-    <metadata key="extruder" value="{extruder_slot}"/>
-    <part id="1" subtype="normal_part">
+        ET.SubElement(assembly_components, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}component', {
+            'objectid': str(obj_id),
+            'transform': '1 0 0 0 1 0 0 0 1 0 0 0'
+        })
+
+        parts_cfg.append(f'''    <part id="{obj_id}" subtype="normal_part">
       <metadata key="name" value="{spec['clean_name']}"/>
       <metadata key="extruder" value="{extruder_slot}"/>
-    </part>
-  </object>''')
+    </part>''')
+
+    ET.SubElement(build, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}item', {'objectid': str(assembly_obj_id)})
+    parts_joined = '\n'.join(parts_cfg)
 
     content_types = '''<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -104,10 +113,13 @@ def export_bambu_3mf(filepath, layer_specs, job_name="Nameplate"):
   <Relationship Target="/Metadata/project_settings.config" Id="rel2" Type="http://schemas.bambulab.com/package/2021/project-settings"/>
 </Relationships>'''
 
-    objects_joined = '\n'.join(objects_cfg)
     model_settings = f'''<?xml version="1.0" encoding="UTF-8"?>
 <config>
-{objects_joined}
+  <object id="{assembly_obj_id}">
+    <metadata key="name" value="{clean_job_name}"/>
+    <metadata key="extruder" value="1"/>
+{parts_joined}
+  </object>
   <plate>
     <metadata key="plater_id" value="1"/>
     <metadata key="plater_name" value=""/>
