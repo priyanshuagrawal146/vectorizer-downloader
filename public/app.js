@@ -2143,6 +2143,7 @@ document.addEventListener('DOMContentLoaded', () => {
     group.updateMatrixWorld(true);
     const verticesList = [];
     const triangleIndices = [];
+    const vertexMap = new Map();
 
     group.traverse(child => {
       if (child.isMesh && child.geometry) {
@@ -2150,34 +2151,51 @@ document.addEventListener('DOMContentLoaded', () => {
         const pos = geom.attributes.position;
         if (!pos) return;
 
-        const baseIdx = verticesList.length;
         const matrix = child.matrixWorld;
         const flipWinding = matrix.determinant() < 0;
 
-        for (let i = 0; i < pos.count; i++) {
-          const v = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i));
+        function getWeldedIndex(rawX, rawY, rawZ) {
+          const v = new THREE.Vector3(rawX, rawY, rawZ);
           v.applyMatrix4(matrix);
-          verticesList.push(v);
+          // Tolerance: 0.001mm (1 micron) to cleanly weld cap and wall vertices
+          const key = (Math.round(v.x * 1000) / 1000).toFixed(3) + '_' + 
+                      (Math.round(v.y * 1000) / 1000).toFixed(3) + '_' + 
+                      (Math.round(v.z * 1000) / 1000).toFixed(3);
+          let idx = vertexMap.get(key);
+          if (idx === undefined) {
+            idx = verticesList.length;
+            vertexMap.set(key, idx);
+            verticesList.push(v);
+          }
+          return idx;
         }
 
         const index = geom.index;
         if (index) {
           for (let i = 0; i < index.count; i += 3) {
-            let i1 = index.getX(i);
-            let i2 = index.getX(i + 1);
-            let i3 = index.getX(i + 2);
-            if (flipWinding) {
-              const tmp = i2; i2 = i3; i3 = tmp;
+            const i1_raw = index.getX(i);
+            const i2_raw = index.getX(i + 1);
+            const i3_raw = index.getX(i + 2);
+
+            let v1 = getWeldedIndex(pos.getX(i1_raw), pos.getY(i1_raw), pos.getZ(i1_raw));
+            let v2 = getWeldedIndex(pos.getX(i2_raw), pos.getY(i2_raw), pos.getZ(i2_raw));
+            let v3 = getWeldedIndex(pos.getX(i3_raw), pos.getY(i3_raw), pos.getZ(i3_raw));
+
+            if (flipWinding) { const tmp = v2; v2 = v3; v3 = tmp; }
+            if (v1 !== v2 && v2 !== v3 && v1 !== v3) {
+              triangleIndices.push([v1, v2, v3]);
             }
-            triangleIndices.push([baseIdx + i1, baseIdx + i2, baseIdx + i3]);
           }
         } else {
           for (let i = 0; i < pos.count; i += 3) {
-            let i1 = i, i2 = i + 1, i3 = i + 2;
-            if (flipWinding) {
-              const tmp = i2; i2 = i3; i3 = tmp;
+            let v1 = getWeldedIndex(pos.getX(i), pos.getY(i), pos.getZ(i));
+            let v2 = getWeldedIndex(pos.getX(i + 1), pos.getY(i + 1), pos.getZ(i + 1));
+            let v3 = getWeldedIndex(pos.getX(i + 2), pos.getY(i + 2), pos.getZ(i + 2));
+
+            if (flipWinding) { const tmp = v2; v2 = v3; v3 = tmp; }
+            if (v1 !== v2 && v2 !== v3 && v1 !== v3) {
+              triangleIndices.push([v1, v2, v3]);
             }
-            triangleIndices.push([baseIdx + i1, baseIdx + i2, baseIdx + i3]);
           }
         }
       }
