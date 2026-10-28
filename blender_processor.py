@@ -26,22 +26,22 @@ def hex_to_linear_rgb(hex_str):
 def export_bambu_3mf(filepath, layer_specs, job_name="Nameplate"):
     """Export native multi-part .3mf project for Bambu Studio with layer-wise extruder assignments."""
     import xml.etree.ElementTree as ET
+    ET.register_namespace('', 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02')
     import zipfile
     import json
     import re
     
     clean_job_name = re.sub(r'[^a-zA-Z0-9_-]', '_', job_name)
-    root = ET.Element('model', {
+    root = ET.Element('{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}model', {
         'unit': 'millimeter',
-        'xml:lang': 'en-US',
-        'xmlns': 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02'
+        'xml:lang': 'en-US'
     })
     
-    resources = ET.SubElement(root, 'resources')
-    components_elem = ET.Element('components')
+    resources = ET.SubElement(root, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}resources')
+    build = ET.SubElement(root, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}build')
     
     filament_colors = []
-    parts_xml = []
+    objects_cfg = []
     
     for idx, spec in enumerate(layer_specs):
         obj_id = idx + 2
@@ -55,47 +55,40 @@ def export_bambu_3mf(filepath, layer_specs, job_name="Nameplate"):
         obj = spec['obj']
         mesh = obj.data
         
-        obj_elem = ET.SubElement(resources, 'object', {
+        obj_elem = ET.SubElement(resources, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}object', {
             'id': str(obj_id),
             'type': 'model',
             'name': spec['clean_name']
         })
-        mesh_elem = ET.SubElement(obj_elem, 'mesh')
-        verts_elem = ET.SubElement(mesh_elem, 'vertices')
+        mesh_elem = ET.SubElement(obj_elem, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}mesh')
+        verts_elem = ET.SubElement(mesh_elem, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}vertices')
         
         for v in mesh.vertices:
             world_co = obj.matrix_world @ v.co
-            ET.SubElement(verts_elem, 'vertex', {
+            ET.SubElement(verts_elem, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}vertex', {
                 'x': f'{world_co.x * 1000.0:.4f}',
                 'y': f'{world_co.y * 1000.0:.4f}',
                 'z': f'{world_co.z * 1000.0:.4f}'
             })
             
-        triangles_elem = ET.SubElement(mesh_elem, 'triangles')
+        triangles_elem = ET.SubElement(mesh_elem, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}triangles')
         for poly in mesh.polygons:
             for i in range(1, len(poly.vertices) - 1):
-                ET.SubElement(triangles_elem, 'triangle', {
+                ET.SubElement(triangles_elem, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}triangle', {
                     'v1': str(poly.vertices[0]),
                     'v2': str(poly.vertices[i]),
                     'v3': str(poly.vertices[i + 1])
                 })
                 
-        ET.SubElement(components_elem, 'component', {'objectid': str(obj_id)})
-        parts_xml.append(f'''    <part id="{obj_id}" subtype="normal_part">
+        ET.SubElement(build, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}item', {'objectid': str(obj_id)})
+        objects_cfg.append(f'''  <object id="{obj_id}">
+    <metadata key="name" value="{spec['clean_name']}"/>
+    <metadata key="extruder" value="{extruder_slot}"/>
+    <part id="1" subtype="normal_part">
       <metadata key="name" value="{spec['clean_name']}"/>
       <metadata key="extruder" value="{extruder_slot}"/>
-    </part>''')
-
-    # Root assembly object
-    root_assembly = ET.SubElement(resources, 'object', {
-        'id': '1',
-        'type': 'model',
-        'name': clean_job_name
-    })
-    root_assembly.append(components_elem)
-
-    build = ET.SubElement(root, 'build')
-    ET.SubElement(build, 'item', {'objectid': '1'})
+    </part>
+  </object>''')
 
     content_types = '''<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -111,14 +104,10 @@ def export_bambu_3mf(filepath, layer_specs, job_name="Nameplate"):
   <Relationship Target="/Metadata/project_settings.config" Id="rel2" Type="http://schemas.bambulab.com/package/2021/project-settings"/>
 </Relationships>'''
 
-    parts_joined = '\n'.join(parts_xml)
+    objects_joined = '\n'.join(objects_cfg)
     model_settings = f'''<?xml version="1.0" encoding="UTF-8"?>
 <config>
-  <object id="1">
-    <metadata key="name" value="{clean_job_name}"/>
-    <metadata key="extruder" value="1"/>
-{parts_joined}
-  </object>
+{objects_joined}
   <plate>
     <metadata key="plater_id" value="1"/>
     <metadata key="plater_name" value=""/>

@@ -2139,6 +2139,53 @@ document.addEventListener('DOMContentLoaded', () => {
   btnExportCombined.addEventListener('click', () => triggerExport('combined'));
   btnViewGuide.addEventListener('click', () => openFilamentGuide());
 
+  function extractIndexedMeshFromGroup(group) {
+    group.updateMatrixWorld(true);
+    const verticesList = [];
+    const triangleIndices = [];
+
+    group.traverse(child => {
+      if (child.isMesh && child.geometry) {
+        const geom = child.geometry;
+        const pos = geom.attributes.position;
+        if (!pos) return;
+
+        const baseIdx = verticesList.length;
+        const matrix = child.matrixWorld;
+        const flipWinding = matrix.determinant() < 0;
+
+        for (let i = 0; i < pos.count; i++) {
+          const v = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i));
+          v.applyMatrix4(matrix);
+          verticesList.push(v);
+        }
+
+        const index = geom.index;
+        if (index) {
+          for (let i = 0; i < index.count; i += 3) {
+            let i1 = index.getX(i);
+            let i2 = index.getX(i + 1);
+            let i3 = index.getX(i + 2);
+            if (flipWinding) {
+              const tmp = i2; i2 = i3; i3 = tmp;
+            }
+            triangleIndices.push([baseIdx + i1, baseIdx + i2, baseIdx + i3]);
+          }
+        } else {
+          for (let i = 0; i < pos.count; i += 3) {
+            let i1 = i, i2 = i + 1, i3 = i + 2;
+            if (flipWinding) {
+              const tmp = i2; i2 = i3; i3 = tmp;
+            }
+            triangleIndices.push([baseIdx + i1, baseIdx + i2, baseIdx + i3]);
+          }
+        }
+      }
+    });
+
+    return { verticesList, triangleIndices };
+  }
+
   function extractTrianglesFromObject(object) {
     const triangles = [];
     object.updateMatrixWorld(true);
@@ -2284,10 +2331,11 @@ document.addEventListener('DOMContentLoaded', () => {
   <Relationship Target="/Metadata/project_settings.config" Id="rel2" Type="http://schemas.bambulab.com/package/2021/project-settings"/>
 </Relationships>`;
 
-    const cleanJobName = (jobName || 'Nameplate').replace(/[^a-zA-Z0-9_-]/g, '_');
     let objectsXml = '';
-    let componentsXml = '';
-    let partsXml = '';
+    let buildXml = '';
+    let modelSettingsXml = `<?xml version="1.0" encoding="UTF-8"?>
+<config>
+`;
     const filamentColors = [];
 
     layerSpecs.forEach((spec, idx) => {
@@ -2299,17 +2347,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (hex.length !== 6) hex = '888888';
       filamentColors.push('#' + hex.toUpperCase());
 
-      const triangles = spec.triangles || [];
-      const verticesList = [];
-      const triangleIndices = [];
-
-      for (let t = 0; t < triangles.length; t++) {
-        const [v1, v2, v3] = triangles[t];
-        if (!v1 || !v2 || !v3) continue;
-        const baseIdx = verticesList.length;
-        verticesList.push(v1, v2, v3);
-        triangleIndices.push([baseIdx, baseIdx + 1, baseIdx + 2]);
-      }
+      const verticesList = spec.indexedMesh ? spec.indexedMesh.verticesList : [];
+      const triangleIndices = spec.indexedMesh ? spec.indexedMesh.triangleIndices : [];
 
       let vertsXml = '';
       for (let v = 0; v < verticesList.length; v++) {
@@ -2330,39 +2369,32 @@ document.addEventListener('DOMContentLoaded', () => {
       </mesh>
     </object>\n`;
 
-      componentsXml += `      <component objectid="${objId}"/>\n`;
+      buildXml += `    <item objectid="${objId}"/>\n`;
 
-      partsXml += `    <part id="${objId}" subtype="normal_part">
+      modelSettingsXml += `  <object id="${objId}">
+    <metadata key="name" value="${spec.cleanName}"/>
+    <metadata key="extruder" value="${extruderSlot}"/>
+    <part id="1" subtype="normal_part">
       <metadata key="name" value="${spec.cleanName}"/>
       <metadata key="extruder" value="${extruderSlot}"/>
-    </part>\n`;
+    </part>
+  </object>\n`;
     });
 
-    const modelXml = `<?xml version="1.0" encoding="UTF-8"?>
-<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
-  <resources>
-${objectsXml}    <object id="1" type="model" name="${cleanJobName}">
-      <components>
-${componentsXml}      </components>
-    </object>
-  </resources>
-  <build>
-    <item objectid="1"/>
-  </build>
-</model>`;
-
-    const modelSettingsXml = `<?xml version="1.0" encoding="UTF-8"?>
-<config>
-  <object id="1">
-    <metadata key="name" value="${cleanJobName}"/>
-    <metadata key="extruder" value="1"/>
-${partsXml}  </object>
-  <plate>
+    modelSettingsXml += `  <plate>
     <metadata key="plater_id" value="1"/>
     <metadata key="plater_name" value=""/>
     <metadata key="locked" value="false"/>
   </plate>
 </config>`;
+
+    const modelXml = `<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+  <resources>
+${objectsXml}  </resources>
+  <build>
+${buildXml}  </build>
+</model>`;
 
     const projectSettingsJson = JSON.stringify({
       filament_colour: filamentColors,
@@ -2419,7 +2451,12 @@ ${partsXml}  </object>
           ? baseThickness 
           : Math.max(0.10, parseFloat(layer.thicknessMm !== undefined ? layer.thicknessMm : 1.00));
         const group = threeLayerMeshes[idx];
-        const triangles = group ? extractTrianglesFromObject(group) : [];
+        const indexedMesh = group ? extractIndexedMeshFromGroup(group) : { verticesList: [], triangleIndices: [] };
+        const triangles = [];
+        for (let t = 0; t < indexedMesh.triangleIndices.length; t++) {
+          const [i1, i2, i3] = indexedMesh.triangleIndices[t];
+          triangles.push([indexedMesh.verticesList[i1], indexedMesh.verticesList[i2], indexedMesh.verticesList[i3]]);
+        }
 
         const zStart = runningZ;
         const zEnd = runningZ + thickMm;
@@ -2443,6 +2480,7 @@ ${partsXml}  </object>
           pauseStartMm: pauseStart,
           pauseEndMm: pauseEnd,
           stlFilename,
+          indexedMesh,
           triangles
         });
       });
