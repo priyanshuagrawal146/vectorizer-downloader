@@ -2296,36 +2296,21 @@ document.addEventListener('DOMContentLoaded', () => {
       const objId = idx + 2;
       const triangles = spec.triangles || [];
 
-      const vertMap = new Map();
       const verticesList = [];
       const triangleIndices = [];
 
-      const getVertIndex = (v) => {
-        // Round to 3 decimal places (1 micron) to weld near-duplicate vertices and reduce memory
-        const key = `${v.x.toFixed(3)},${v.y.toFixed(3)},${v.z.toFixed(3)}`;
-        if (vertMap.has(key)) {
-          return vertMap.get(key);
-        }
-        const newIdx = verticesList.length;
-        verticesList.push(v);
-        vertMap.set(key, newIdx);
-        return newIdx;
-      };
-
       for (let t = 0; t < triangles.length; t++) {
         const [v1, v2, v3] = triangles[t];
-        const i1 = getVertIndex(v1);
-        const i2 = getVertIndex(v2);
-        const i3 = getVertIndex(v3);
-        if (i1 !== i2 && i2 !== i3 && i1 !== i3) {
-          triangleIndices.push([i1, i2, i3]);
-        }
+        if (!v1 || !v2 || !v3) continue;
+        const baseIdx = verticesList.length;
+        verticesList.push(v1, v2, v3);
+        triangleIndices.push([baseIdx, baseIdx + 1, baseIdx + 2]);
       }
 
       let vertsXml = '';
       for (let v = 0; v < verticesList.length; v++) {
         const vert = verticesList[v];
-        vertsXml += `<vertex x="${parseFloat(vert.x.toFixed(3))}" y="${parseFloat(vert.y.toFixed(3))}" z="${parseFloat(vert.z.toFixed(3))}"/>\n`;
+        vertsXml += `<vertex x="${vert.x.toFixed(4)}" y="${vert.y.toFixed(4)}" z="${vert.z.toFixed(4)}"/>\n`;
       }
 
       let trisXml = '';
