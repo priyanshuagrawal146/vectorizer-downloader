@@ -1905,11 +1905,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (isBase) {
         // 1. Base Layer: extrude foundation plate from Z = 0 to baseThickness
-        // Strictly use base outline paths — zero upper paths injected to keep base infill 100% clean
+        // Always build base paths using all layers when solidBase is on,
+        // so the base is 100% solid foundation under all layers and borders.
         let basePathsHtml = '';
-        (layer.paths || []).forEach(rawD => {
-          basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
-        });
+        if (studioState.solidBase) {
+          studioState.layers.forEach(l => {
+            (l.paths || []).forEach(rawD => {
+              basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
+            });
+          });
+        } else {
+          (layer.paths || []).forEach(rawD => {
+            basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
+          });
+        }
         const baseSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
           <g fill="${layer.color}">${basePathsHtml}</g>
         </svg>`;
