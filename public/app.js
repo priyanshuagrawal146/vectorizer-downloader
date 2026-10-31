@@ -218,7 +218,7 @@ document.addEventListener('DOMContentLoaded', () => {
   sendTo3dBtn.addEventListener('click', () => {
     if (!currentResult || !currentResult.svg) return;
     switchTab('3d');
-    loadSvgIntoStudio(currentResult.svg, currentResult.filename || 'Nameplate');
+    loadSvgIntoStudio(currentResult.svg, currentResult.filename || 'Nameplate', currentResult.studioData, currentResult.id);
   });
 
   // Export handlers
@@ -298,17 +298,93 @@ document.addEventListener('DOMContentLoaded', () => {
   function saveToHistory(res) {
     try {
       const list = JSON.parse(localStorage.getItem('vec_history') || '[]');
-      list.unshift({
-        id: Date.now(),
+      const itemId = res.id || Date.now();
+      const existingIdx = list.findIndex(item => item.id === itemId || (item.filename === res.filename && item.svg === res.svg));
+      
+      const historyItem = {
+        id: itemId,
         filename: res.filename,
         width: res.width,
         height: res.height,
-        shapes: res.shapeCount,
-        svg: res.svg
-      });
-      localStorage.setItem('vec_history', JSON.stringify(list.slice(0, 8)));
+        shapes: res.shapeCount || res.shapes,
+        svg: res.svg,
+        studioData: res.studioData || null,
+        lastEdited: Date.now()
+      };
+
+      if (existingIdx >= 0) {
+        // Preserve any existing studioData if not provided
+        if (!historyItem.studioData && list[existingIdx].studioData) {
+          historyItem.studioData = list[existingIdx].studioData;
+        }
+        list.splice(existingIdx, 1);
+      }
+
+      list.unshift(historyItem);
+      localStorage.setItem('vec_history', JSON.stringify(list.slice(0, 30)));
       renderHistory();
-    } catch (e) {}
+      return historyItem.id;
+    } catch (e) {
+      console.warn('Failed to save to history:', e);
+      return null;
+    }
+  }
+
+  // Save edited 3D model studio state back into history
+  function saveStudioStateToHistory() {
+    try {
+      if (!studioState.svg) return;
+      const list = JSON.parse(localStorage.getItem('vec_history') || '[]');
+      
+      // Look for match by studioState.historyId, or by SVG match or filename
+      let targetIdx = -1;
+      if (studioState.historyId) {
+        targetIdx = list.findIndex(item => item.id === studioState.historyId);
+      }
+      if (targetIdx === -1 && studioState.svg) {
+        targetIdx = list.findIndex(item => item.svg === studioState.svg);
+      }
+      if (targetIdx === -1 && studioState.jobName) {
+        targetIdx = list.findIndex(item => item.filename === studioState.jobName);
+      }
+
+      const studioData = {
+        layers: studioState.layers ? JSON.parse(JSON.stringify(studioState.layers)) : [],
+        fixedWidthMm: studioState.fixedWidthMm,
+        totalThicknessMm: studioState.totalThicknessMm,
+        proportionalHeightMm: studioState.proportionalHeightMm,
+        solidBase: studioState.solidBase,
+        autoSolidifyPlates: studioState.autoSolidifyPlates,
+        analysis: studioState.analysis,
+        raisedTextDetected: studioState.raisedTextDetected,
+        updatedAt: Date.now()
+      };
+
+      if (targetIdx >= 0) {
+        list[targetIdx].studioData = studioData;
+        list[targetIdx].lastEdited = Date.now();
+        studioState.historyId = list[targetIdx].id;
+      } else {
+        // Create new history entry for uploaded or loaded 3D models
+        const newId = Date.now();
+        studioState.historyId = newId;
+        list.unshift({
+          id: newId,
+          filename: studioState.jobName || '3D Model',
+          width: studioState.analysis?.width || Math.round(studioState.fixedWidthMm),
+          height: studioState.analysis?.height || Math.round(studioState.proportionalHeightMm),
+          shapes: studioState.layers?.length || 0,
+          svg: studioState.svg,
+          studioData: studioData,
+          lastEdited: Date.now()
+        });
+      }
+
+      localStorage.setItem('vec_history', JSON.stringify(list.slice(0, 30)));
+      renderHistory();
+    } catch (e) {
+      console.warn('Failed to save studio state to history:', e);
+    }
   }
 
   function renderHistory() {
@@ -323,25 +399,65 @@ document.addEventListener('DOMContentLoaded', () => {
       list.forEach(item => {
         const card = document.createElement('div');
         card.className = 'history-card';
+        
+        const hasEditedModel = !!(item.studioData && item.studioData.layers && item.studioData.layers.length > 0);
+        const layerCount = hasEditedModel 
+          ? item.studioData.layers.length 
+          : (item.shapes || 0);
+        const widthMm = (hasEditedModel && item.studioData.fixedWidthMm) 
+          ? `${item.studioData.fixedWidthMm.toFixed(0)}mm` 
+          : `${item.width}px`;
+        const thickMm = (hasEditedModel && item.studioData.totalThicknessMm)
+          ? ` • ${item.studioData.totalThicknessMm.toFixed(1)}mm Z`
+          : '';
+
+        const badgeHtml = hasEditedModel
+          ? `<span class="history-badge badge-3d">✓ 3D Model Saved (${layerCount} layers)</span>`
+          : `<span class="history-badge badge-model">3D Model (${layerCount} shapes)</span>`;
+
         card.innerHTML = `
           <div class="history-thumb">${item.svg}</div>
           <div class="history-info">
-            <span class="history-name">${item.filename}</span>
-            <span class="history-meta">${item.width}×${item.height} • ${item.shapes || 0} shapes</span>
+            <span class="history-name" title="${item.filename}">${item.filename}</span>
+            <span class="history-meta">${widthMm}${thickMm} • ${layerCount} layers/elements</span>
+            ${badgeHtml}
+            <div class="history-card-actions">
+              <button class="history-btn-open" type="button" title="Open directly into 3D Studio">Open 3D Model →</button>
+            </div>
           </div>
         `;
+
+        // Clicking "Open 3D Model" button
+        const openBtn = card.querySelector('.history-btn-open');
+        openBtn?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          currentResult = item;
+          switchTab('3d');
+          loadSvgIntoStudio(item.svg, item.filename || '3D Model', item.studioData, item.id);
+        });
+
+        // Clicking the card itself
         card.addEventListener('click', () => {
           currentResult = item;
           displayResult(item);
+          // Also pre-wire into 3D studio if user switches
+          if (item.studioData) {
+            studioState.historyId = item.id;
+          }
         });
+
         historyList.appendChild(card);
       });
-    } catch (e) {}
+    } catch (e) {
+      console.warn('Failed to render history:', e);
+    }
   }
 
   clearHistoryBtn?.addEventListener('click', () => {
-    localStorage.removeItem('vec_history');
-    renderHistory();
+    if (confirm('Clear all saved 3D models and extraction history?')) {
+      localStorage.removeItem('vec_history');
+      renderHistory();
+    }
   });
 
   renderHistory();
@@ -428,7 +544,8 @@ document.addEventListener('DOMContentLoaded', () => {
     selectedLayerIndices: new Set(),
     raisedTextDetected: false,  // true when hole-paths were successfully raised as 3D text
     cameraInitialized: false,
-    modelCentered: false
+    modelCentered: false,
+    historyId: null
   };
 
   // ==================== UNDO / REDO SYSTEM ====================
@@ -441,6 +558,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (undoStack.length > 50) undoStack.shift();
     redoStack = [];
     updateUndoRedoButtons();
+    // Auto-persist edited 3D model into history
+    saveStudioStateToHistory();
   }
 
   function undoStudio() {
@@ -453,6 +572,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderLayersList();
     updateThreeGeometry();
     updateDimensionBadges();
+    saveStudioStateToHistory();
   }
 
   function redoStudio() {
@@ -465,6 +585,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderLayersList();
     updateThreeGeometry();
     updateDimensionBadges();
+    saveStudioStateToHistory();
   }
 
   function updateUndoRedoButtons() {
@@ -550,16 +671,52 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Load SVG into 3D Studio
-  async function loadSvgIntoStudio(svgStr, name = 'Nameplate') {
+  // Load SVG into 3D Studio (supports restoring edited 3D model state)
+  async function loadSvgIntoStudio(svgStr, name = 'Nameplate', savedStudioData = null, historyId = null) {
     studioState.svg = svgStr;
     studioState.jobName = name;
     studioState.activeMergeIdx = null;
     studioState.selectedLayerIndices.clear();
+    studioState.historyId = historyId || null;
     viewportModelName.textContent = name;
 
     studioDropzone.classList.add('hidden');
     studioWorkspace.classList.remove('hidden');
+
+    // If we have saved 3D model studio data (custom layers, thickness, dimensions, etc.), restore it directly!
+    if (savedStudioData && savedStudioData.layers && savedStudioData.layers.length > 0) {
+      try {
+        showThreeLoading(true);
+        studioState.analysis = savedStudioData.analysis || null;
+        studioState.fixedWidthMm = savedStudioData.fixedWidthMm || 150.0;
+        studioState.totalThicknessMm = savedStudioData.totalThicknessMm || 10.0;
+        studioState.proportionalHeightMm = savedStudioData.proportionalHeightMm || 100.0;
+        if (savedStudioData.solidBase !== undefined) studioState.solidBase = savedStudioData.solidBase;
+        if (savedStudioData.autoSolidifyPlates !== undefined) studioState.autoSolidifyPlates = savedStudioData.autoSolidifyPlates;
+        if (savedStudioData.raisedTextDetected !== undefined) studioState.raisedTextDetected = savedStudioData.raisedTextDetected;
+        
+        // Deep copy restored layers
+        studioState.layers = JSON.parse(JSON.stringify(savedStudioData.layers));
+        studioState.cameraInitialized = false;
+        studioState.modelCentered = false;
+
+        // Sync input controls if present
+        if (inputFixedWidth) inputFixedWidth.value = studioState.fixedWidthMm;
+        if (inputTotalThickness) inputTotalThickness.value = studioState.totalThicknessMm.toFixed(1);
+
+        undoStack = [];
+        redoStack = [];
+        updateUndoRedoButtons();
+        updateDimensionBadges();
+        renderLayersList();
+        initOrUpdateThreeScene();
+        return;
+      } catch (err) {
+        console.warn('Could not restore saved 3D model state, falling back to fresh analysis:', err);
+      } finally {
+        showThreeLoading(false);
+      }
+    }
 
     await fetchAndApplyAnalysis();
   }
@@ -617,6 +774,8 @@ document.addEventListener('DOMContentLoaded', () => {
       updateDimensionBadges();
       renderLayersList();
       initOrUpdateThreeScene();
+      // Save initial 3D model state to history
+      saveStudioStateToHistory();
     } catch (err) {
       alert('Error analyzing SVG: ' + err.message);
     } finally {
@@ -960,6 +1119,10 @@ document.addEventListener('DOMContentLoaded', () => {
       updateDimensionBadges();
       scheduleLiveGeometryUpdate();
     }
+  });
+
+  inputFixedWidth.addEventListener('change', () => {
+    saveStudioStateToHistory();
   });
 
   const handleTotalThicknessChange = (isCommit) => {
