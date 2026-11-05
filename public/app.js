@@ -294,12 +294,155 @@ document.addEventListener('DOMContentLoaded', () => {
     if (svgEl) svgEl.style.transform = 'scale(1)';
   });
 
+  // ==================== PERSISTENT HISTORY STORAGE (INDEXEDDB + SAFE LOCALSTORAGE FALLBACK) ====================
+  const MAX_HISTORY_SLOTS = 30;
+  let historyCache = [];
+  let isHistoryLoaded = false;
+  let dbPromise = null;
+  const historyCountBadge = document.getElementById('historyCountBadge');
+
+  function getHistoryDB() {
+    if (!window.indexedDB) return Promise.resolve(null);
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve) => {
+      try {
+        const req = indexedDB.open('VectorizerAppDB', 1);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains('history')) {
+            const store = db.createObjectStore('history', { keyPath: 'id' });
+            store.createIndex('lastEdited', 'lastEdited', { unique: false });
+          }
+        };
+        req.onsuccess = (e) => resolve(e.target.result);
+        req.onerror = (e) => {
+          console.warn('IndexedDB unavailable, falling back to localStorage:', e);
+          resolve(null);
+        };
+      } catch (err) {
+        console.warn('IndexedDB open threw exception:', err);
+        resolve(null);
+      }
+    });
+    return dbPromise;
+  }
+
+  // Load history on boot: Check IndexedDB first, migrate legacy localStorage if needed
+  async function loadHistoryFromStorage() {
+    // 1. Initial fast synchronous read from localStorage
+    try {
+      const raw = localStorage.getItem('vec_history');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          historyCache = parsed.slice(0, MAX_HISTORY_SLOTS);
+        }
+      }
+    } catch (e) {}
+
+    // Render immediately if localStorage had items
+    if (historyCache.length > 0) {
+      renderHistory();
+    }
+
+    // 2. Query IndexedDB for high-capacity persistence
+    try {
+      const db = await getHistoryDB();
+      if (db) {
+        const items = await new Promise((resolve, reject) => {
+          const tx = db.transaction('history', 'readonly');
+          const store = tx.objectStore('history');
+          const req = store.getAll();
+          req.onsuccess = () => resolve(req.result || []);
+          req.onerror = () => reject(req.error);
+        });
+
+        if (items && items.length > 0) {
+          // Sort newest first
+          items.sort((a, b) => (b.lastEdited || b.id || 0) - (a.lastEdited || a.id || 0));
+          historyCache = items.slice(0, MAX_HISTORY_SLOTS);
+
+          // If IndexedDB had more than MAX_HISTORY_SLOTS, remove excess older items
+          if (items.length > MAX_HISTORY_SLOTS) {
+            const excess = items.slice(MAX_HISTORY_SLOTS);
+            const delTx = db.transaction('history', 'readwrite');
+            const delStore = delTx.objectStore('history');
+            excess.forEach(ex => delStore.delete(ex.id));
+          }
+        } else if (historyCache.length > 0) {
+          // Migrate localStorage legacy items into IndexedDB
+          const migTx = db.transaction('history', 'readwrite');
+          const migStore = migTx.objectStore('history');
+          historyCache.forEach(item => migStore.put(item));
+        }
+      }
+    } catch (err) {
+      console.warn('IndexedDB load error:', err);
+    }
+
+    isHistoryLoaded = true;
+    renderHistory();
+  }
+
+  // Auto-remove oldest items when slots or storage get full, and persist safely
+  async function persistHistory() {
+    // 1. Strictly enforce MAX_HISTORY_SLOTS: automatically drop oldest from end
+    const evictedIds = [];
+    while (historyCache.length > MAX_HISTORY_SLOTS) {
+      const removed = historyCache.pop();
+      if (removed && removed.id) evictedIds.push(removed.id);
+    }
+
+    // 2. Save into IndexedDB (virtually unlimited capacity, no 5MB quota errors)
+    try {
+      const db = await getHistoryDB();
+      if (db) {
+        const tx = db.transaction('history', 'readwrite');
+        const store = tx.objectStore('history');
+        historyCache.forEach(item => store.put(item));
+        evictedIds.forEach(id => store.delete(id));
+      }
+    } catch (idbErr) {
+      console.warn('IndexedDB persist error:', idbErr);
+    }
+
+    // 3. Backup to localStorage with intelligent FIFO quota auto-eviction
+    try {
+      let lsList = historyCache.map(item => ({
+        id: item.id,
+        filename: item.filename,
+        width: item.width,
+        height: item.height,
+        shapes: item.shapes,
+        svg: item.svg,
+        studioData: item.studioData,
+        lastEdited: item.lastEdited
+      }));
+
+      // While loop: if localStorage quota is exceeded, pop oldest items until it fits!
+      let saved = false;
+      while (lsList.length > 0 && !saved) {
+        try {
+          localStorage.setItem('vec_history', JSON.stringify(lsList));
+          saved = true;
+        } catch (quotaErr) {
+          // Auto-remove oldest item from localStorage backup to free space
+          lsList.pop();
+        }
+      }
+      if (!saved && lsList.length === 0) {
+        try { localStorage.removeItem('vec_history'); } catch (e) {}
+      }
+    } catch (e) {
+      console.warn('LocalStorage backup error:', e);
+    }
+  }
+
   // Local storage history
   function saveToHistory(res) {
     try {
-      const list = JSON.parse(localStorage.getItem('vec_history') || '[]');
       const itemId = res.id || Date.now();
-      const existingIdx = list.findIndex(item => item.id === itemId || (item.filename === res.filename && item.svg === res.svg));
+      const existingIdx = historyCache.findIndex(item => item.id === itemId || (item.filename === res.filename && item.svg === res.svg));
       
       const historyItem = {
         id: itemId,
@@ -314,15 +457,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (existingIdx >= 0) {
         // Preserve any existing studioData if not provided
-        if (!historyItem.studioData && list[existingIdx].studioData) {
-          historyItem.studioData = list[existingIdx].studioData;
+        if (!historyItem.studioData && historyCache[existingIdx].studioData) {
+          historyItem.studioData = historyCache[existingIdx].studioData;
         }
-        list.splice(existingIdx, 1);
+        historyCache.splice(existingIdx, 1);
       }
 
-      list.unshift(historyItem);
-      localStorage.setItem('vec_history', JSON.stringify(list.slice(0, 30)));
+      // Prepend to top (most recent)
+      historyCache.unshift(historyItem);
+
+      // Auto-remove oldest if slots are full
+      while (historyCache.length > MAX_HISTORY_SLOTS) {
+        historyCache.pop();
+      }
+
       renderHistory();
+      persistHistory();
       return historyItem.id;
     } catch (e) {
       console.warn('Failed to save to history:', e);
@@ -334,18 +484,17 @@ document.addEventListener('DOMContentLoaded', () => {
   function saveStudioStateToHistory() {
     try {
       if (!studioState.svg) return;
-      const list = JSON.parse(localStorage.getItem('vec_history') || '[]');
       
       // Look for match by studioState.historyId, or by SVG match or filename
       let targetIdx = -1;
       if (studioState.historyId) {
-        targetIdx = list.findIndex(item => item.id === studioState.historyId);
+        targetIdx = historyCache.findIndex(item => item.id === studioState.historyId);
       }
       if (targetIdx === -1 && studioState.svg) {
-        targetIdx = list.findIndex(item => item.svg === studioState.svg);
+        targetIdx = historyCache.findIndex(item => item.svg === studioState.svg);
       }
       if (targetIdx === -1 && studioState.jobName) {
-        targetIdx = list.findIndex(item => item.filename === studioState.jobName);
+        targetIdx = historyCache.findIndex(item => item.filename === studioState.jobName);
       }
 
       const studioData = {
@@ -361,14 +510,18 @@ document.addEventListener('DOMContentLoaded', () => {
       };
 
       if (targetIdx >= 0) {
-        list[targetIdx].studioData = studioData;
-        list[targetIdx].lastEdited = Date.now();
-        studioState.historyId = list[targetIdx].id;
+        const item = historyCache[targetIdx];
+        item.studioData = studioData;
+        item.lastEdited = Date.now();
+        studioState.historyId = item.id;
+        // Bump edited model to the front so it remains active and doesn't get evicted
+        historyCache.splice(targetIdx, 1);
+        historyCache.unshift(item);
       } else {
         // Create new history entry for uploaded or loaded 3D models
         const newId = Date.now();
         studioState.historyId = newId;
-        list.unshift({
+        historyCache.unshift({
           id: newId,
           filename: studioState.jobName || '3D Model',
           width: studioState.analysis?.width || Math.round(studioState.fixedWidthMm),
@@ -380,25 +533,51 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       }
 
-      localStorage.setItem('vec_history', JSON.stringify(list.slice(0, 30)));
+      // Auto-remove oldest if slots are full
+      while (historyCache.length > MAX_HISTORY_SLOTS) {
+        historyCache.pop();
+      }
+
       renderHistory();
+      persistHistory();
     } catch (e) {
       console.warn('Failed to save studio state to history:', e);
     }
   }
 
+  async function deleteFromHistory(id) {
+    const idx = historyCache.findIndex(item => item.id === id);
+    if (idx >= 0) {
+      historyCache.splice(idx, 1);
+      renderHistory();
+      try {
+        const db = await getHistoryDB();
+        if (db) {
+          const tx = db.transaction('history', 'readwrite');
+          tx.objectStore('history').delete(id);
+        }
+      } catch (e) {}
+      persistHistory();
+    }
+  }
+
   function renderHistory() {
     try {
-      const list = JSON.parse(localStorage.getItem('vec_history') || '[]');
-      if (list.length === 0) {
+      const list = historyCache;
+      if (!list || list.length === 0) {
         historySection.classList.add('hidden');
+        if (historyCountBadge) historyCountBadge.textContent = '';
         return;
       }
       historySection.classList.remove('hidden');
+      if (historyCountBadge) {
+        historyCountBadge.textContent = `(${list.length} / ${MAX_HISTORY_SLOTS} slots)`;
+      }
       historyList.innerHTML = '';
       list.forEach(item => {
         const card = document.createElement('div');
         card.className = 'history-card';
+        card.dataset.id = item.id;
         
         const hasEditedModel = !!(item.studioData && item.studioData.layers && item.studioData.layers.length > 0);
         const layerCount = hasEditedModel 
@@ -416,6 +595,7 @@ document.addEventListener('DOMContentLoaded', () => {
           : `<span class="history-badge badge-model">3D Model (${layerCount} shapes)</span>`;
 
         card.innerHTML = `
+          <button class="history-btn-delete" type="button" title="Delete this model from history" aria-label="Delete">×</button>
           <div class="history-thumb">${item.svg}</div>
           <div class="history-info">
             <span class="history-name" title="${item.filename}">${item.filename}</span>
@@ -426,6 +606,13 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
         `;
+
+        // Clicking delete button
+        const delBtn = card.querySelector('.history-btn-delete');
+        delBtn?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          deleteFromHistory(item.id);
+        });
 
         // Clicking "Open 3D Model" button
         const openBtn = card.querySelector('.history-btn-open');
@@ -453,14 +640,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  clearHistoryBtn?.addEventListener('click', () => {
+  clearHistoryBtn?.addEventListener('click', async () => {
     if (confirm('Clear all saved 3D models and extraction history?')) {
-      localStorage.removeItem('vec_history');
+      historyCache = [];
       renderHistory();
+      try {
+        localStorage.removeItem('vec_history');
+      } catch (e) {}
+      try {
+        const db = await getHistoryDB();
+        if (db) {
+          const tx = db.transaction('history', 'readwrite');
+          tx.objectStore('history').clear();
+        }
+      } catch (e) {}
     }
   });
 
-  renderHistory();
+  loadHistoryFromStorage();
 
   // ==================== 3D FDM NAMEPLATE STUDIO LOGIC ====================
   const studioDropzone = document.getElementById('studioDropzone');
