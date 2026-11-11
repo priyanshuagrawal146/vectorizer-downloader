@@ -269,6 +269,14 @@ function analyzeSvgLayers(svgContent, options = {}) {
           d += ' Z';
         }
       }
+    } else if (tag === 'ellipse') {
+      const cx = parseFloat((attrs.match(/\bcx=[\"\']([0-9.-]+)[\"\']/) || [0,0])[1]);
+      const cy = parseFloat((attrs.match(/\bcy=[\"\']([0-9.-]+)[\"\']/) || [0,0])[1]);
+      const rx = parseFloat((attrs.match(/\brx=[\"\']([0-9.-]+)[\"\']/) || [0,0])[1]);
+      const ry = parseFloat((attrs.match(/\bry=[\"\']([0-9.-]+)[\"\']/) || [0,0])[1]);
+      if (rx > 0 && ry > 0) {
+        d = `M ${cx - rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx + rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx - rx} ${cy} Z`;
+      }
     }
 
     if (!d) continue;
@@ -389,7 +397,7 @@ function analyzeSvgLayers(svgContent, options = {}) {
       }
     } else if (chain.length >= 2) {
       const avgH = chain.reduce((acc, c) => acc + c.bbox.height, 0) / chain.length;
-      if (avgH >= 35) {
+      if (avgH >= 10) {
         chain.forEach(c => textSet.add(c));
       }
     }
@@ -419,6 +427,65 @@ function analyzeSvgLayers(svgContent, options = {}) {
       }
       if (arcCount >= 1) {
         textSet.add(a);
+      }
+    }
+  }
+
+  // 3. Associate Punctuation, Dots ('i'/'j' tittles), and Diacritics with detected text
+  // Small glyphs like dots of 'i'/'j', periods (Mr., Ltd., Dr.), commas, colons, hyphens,
+  // apostrophes, etc. fail letter chain detection because of small height / ratio,
+  // but they physically belong to the adjacent text of the SAME color.
+  let addedAssociated = true;
+  while (addedAssociated) {
+    addedAssociated = false;
+    for (let i = 0; i < detailElements.length; i++) {
+      const cand = detailElements[i];
+      if (textSet.has(cand)) continue;
+
+      for (const textEl of textSet) {
+        if (cand.fill !== textEl.fill) continue;
+
+        // Check A: Tittle / Dot above letter (e.g. 'i', 'j') or accent mark
+        // The dot sits directly above the letter stem within its horizontal span
+        const candCenterX = (cand.bbox.minX + cand.bbox.maxX) / 2;
+        const hTolerance = Math.max(5, textEl.bbox.width * 0.55);
+        const isHorizAligned = candCenterX >= textEl.bbox.minX - hTolerance && candCenterX <= textEl.bbox.maxX + hTolerance;
+
+        // In SVG coordinates, Y increases downwards. Above textEl means cand.bbox.maxY is near or above textEl.bbox.minY
+        const isAboveStem = cand.bbox.maxY >= textEl.bbox.minY - textEl.bbox.height * 0.95 &&
+                            cand.bbox.minY <= textEl.bbox.minY + textEl.bbox.height * 0.35;
+        const isTittleSize = cand.bbox.height <= textEl.bbox.height * 0.70 &&
+                             cand.bbox.area <= textEl.bbox.area * 0.50;
+
+        if (isHorizAligned && isAboveStem && isTittleSize) {
+          textSet.add(cand);
+          addedAssociated = true;
+          break;
+        }
+
+        // Check B: Punctuation (Period '.', Comma ',', Colon ':', Semicolon ';', Hyphen '-', Apostrophe "'", etc.)
+        // Punctuation is adjacent horizontally to a text letter and vertically within the text line height span
+        const xDist = (cand.bbox.minX > textEl.bbox.maxX)
+          ? (cand.bbox.minX - textEl.bbox.maxX)
+          : (textEl.bbox.minX > cand.bbox.maxX ? (textEl.bbox.minX - cand.bbox.maxX) : 0);
+
+        const maxPunctGap = Math.max(12, textEl.bbox.height * 1.35);
+        const isPunctNear = xDist <= maxPunctGap;
+
+        // Vertically within line band (from slightly above top to slightly below baseline)
+        const isVertInLine = cand.bbox.minY >= textEl.bbox.minY - textEl.bbox.height * 0.40 &&
+                             cand.bbox.maxY <= textEl.bbox.maxY + textEl.bbox.height * 0.40;
+
+        // Punctuation size limits (must not be a giant shape or long divider bar)
+        const isPunctSize = cand.bbox.height <= textEl.bbox.height * 0.90 &&
+                            cand.bbox.width <= Math.max(textEl.bbox.height * 1.6, textEl.bbox.width * 2.5) &&
+                            cand.bbox.area <= textEl.bbox.area * 0.75;
+
+        if (isPunctNear && isVertInLine && isPunctSize) {
+          textSet.add(cand);
+          addedAssociated = true;
+          break;
+        }
       }
     }
   }
