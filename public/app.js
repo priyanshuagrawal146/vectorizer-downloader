@@ -2470,17 +2470,17 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
 
       if (isBase) {
         // 1. Base Layer: extrude foundation plate from Z = 0 to baseThickness
-        // Use the base layer's own paths so upper artwork layers are not duplicated inside the base
+        // When Solid Base is active, union all layers' paths so upper artwork never hangs in mid-air
         let basePathsHtml = '';
-        if (layer.paths && layer.paths.length > 0) {
-          layer.paths.forEach(rawD => {
-            basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
-          });
-        } else if (studioState.solidBase) {
+        if (studioState.solidBase) {
           studioState.layers.forEach(l => {
             (l.paths || []).forEach(rawD => {
               basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
             });
+          });
+        } else {
+          (layer.paths || []).forEach(rawD => {
+            basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
           });
         }
         const baseSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
@@ -2596,11 +2596,20 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
 
         if (isBase && brandingFont && bottomPlate) {
           const brandCx = bottomPlate.sCx;
-          // Shift text up: half of previous offset
-          const brandCy = bottomPlate.sCy - bottomPlate.sH * 0.075 - (7.5 / currentScale);
-          // Text size: 45% of plate width, 8mm margins, max 48mm — good readability without being too bold
-          const plateMarginSvg = 8 / currentScale;
-          const targetWInSvg = Math.min(bottomPlate.sW * 0.45, bottomPlate.sW - 2 * plateMarginSvg, (48 / currentScale));
+          // Calculate scale and dimensions to perfectly fit inside bottomPlate without clipping
+          const plateMarginSvg = 6 / currentScale;
+          const maxTextWByPlateW = Math.min(bottomPlate.sW * 0.45, bottomPlate.sW - 2 * plateMarginSvg, (45 / currentScale));
+          // Keep total text height within 68% of plate height so line 2 (Order ID) never runs off the bottom edge
+          const maxTextWByPlateH = (bottomPlate.sH * 0.68) * (509 / 155);
+          const targetWInSvg = Math.min(maxTextWByPlateW, maxTextWByPlateH);
+
+          // Shift slightly upward from center to leave comfortable bottom margin, bounded safely
+          const plateH_mm = bottomPlate.sH * currentScale;
+          const estTextH_mm = Math.min(14, plateH_mm * 0.68);
+          const maxShiftUp_mm = Math.max(0, (plateH_mm - estTextH_mm) / 2 - 1.5);
+          const shiftUp_mm = Math.min(2.5, maxShiftUp_mm);
+          const brandCy = bottomPlate.sCy - (shiftUp_mm / currentScale);
+
           masterDebossShapes = generateBrandingShapes(studioState.orderId, brandCx, brandCy, targetWInSvg);
           if (masterDebossShapes.length > 0) {
             let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
@@ -2674,9 +2683,17 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
                   cavShape.holes.push(new THREE.Path(isl.map(p => new THREE.Vector2(p.x, p.y))));
                 });
                 const cavGeom = new THREE.ShapeGeometry(cavShape);
-                const cavMat = new THREE.MeshBasicMaterial({ color: 0x181818, side: THREE.DoubleSide });
+                const cavMat = new THREE.MeshBasicMaterial({
+                  color: 0x181818,
+                  side: THREE.DoubleSide,
+                  depthWrite: false,
+                  polygonOffset: true,
+                  polygonOffsetFactor: -2,
+                  polygonOffsetUnits: -2
+                });
                 const cavMesh = new THREE.Mesh(cavGeom, cavMat);
                 cavMesh.position.z = debossDepth - 0.005; // Placed at ceiling of deboss cavity facing down
+                cavMesh.renderOrder = 2;
                 cavMesh.userData.isVisualAccent = true; // Mark as visual accent to exclude from physical manufacturing mesh
                 layerGroup.add(cavMesh);
               });
