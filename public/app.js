@@ -1,6 +1,164 @@
 document.addEventListener('DOMContentLoaded', () => {
   // ==================== NAVIGATION TABS ====================
-  const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
+  // ── Debossed Base Branding Engine (VIVAGIFTS + Order ID) ──
+  let brandingFont = null;
+  let brandingFontLoading = null;
+
+  async function ensureBrandingFont() {
+    if (brandingFont) return brandingFont;
+    if (brandingFontLoading) return await brandingFontLoading;
+    if (typeof opentype === 'undefined') {
+      console.warn('opentype.js is not loaded');
+      return null;
+    }
+    brandingFontLoading = new Promise((resolve) => {
+      // Arial regular: clean, balanced strokes with wide open counters (A, 8, 6, 0)
+      opentype.load('fonts/Arial.ttf', (err, font) => {
+        if (err || !font) {
+          console.warn('Could not load branding font Arial.ttf:', err);
+          resolve(null);
+        } else {
+          brandingFont = font;
+          resolve(font);
+        }
+      });
+    });
+    return await brandingFontLoading;
+  }
+
+  function otPathToSubpaths(otPath) {
+    const subpaths = [];
+    let curr = null;
+    for (const cmd of otPath.commands) {
+      if (cmd.type === 'M') {
+        if (curr && curr.points.length >= 3) subpaths.push(curr);
+        curr = { points: [{ x: cmd.x, y: cmd.y }] };
+      } else if (cmd.type === 'L') {
+        if (curr) curr.points.push({ x: cmd.x, y: cmd.y });
+      } else if (cmd.type === 'Q') {
+        if (curr) {
+          const p0 = curr.points[curr.points.length - 1];
+          for (let t = 0.25; t <= 1.0; t += 0.25) {
+            const x = (1 - t) * (1 - t) * p0.x + 2 * (1 - t) * t * cmd.x1 + t * t * cmd.x;
+            const y = (1 - t) * (1 - t) * p0.y + 2 * (1 - t) * t * cmd.y1 + t * t * cmd.y;
+            curr.points.push({ x, y });
+          }
+        }
+      } else if (cmd.type === 'C') {
+        if (curr) {
+          const p0 = curr.points[curr.points.length - 1];
+          for (let t = 0.2; t <= 1.0; t += 0.2) {
+            const x = Math.pow(1 - t, 3) * p0.x + 3 * Math.pow(1 - t, 2) * t * cmd.x1 + 3 * (1 - t) * t * t * cmd.x2 + Math.pow(t, 3) * cmd.x;
+            const y = Math.pow(1 - t, 3) * p0.y + 3 * Math.pow(1 - t, 2) * t * cmd.y1 + 3 * (1 - t) * t * t * cmd.y2 + Math.pow(t, 3) * cmd.y;
+            curr.points.push({ x, y });
+          }
+        }
+      } else if (cmd.type === 'Z') {
+        if (curr && curr.points.length >= 3) {
+          subpaths.push(curr);
+          curr = null;
+        }
+      }
+    }
+    if (curr && curr.points.length >= 3) subpaths.push(curr);
+    return subpaths;
+  }
+
+  function otPolyArea(poly) {
+    let area = 0;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      area += (poly[j].x + poly[i].x) * (poly[j].y - poly[i].y);
+    }
+    return area / 2;
+  }
+
+  function otPointInPoly(pt, poly) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i].x, yi = poly[i].y;
+      const xj = poly[j].x, yj = poly[j].y;
+      const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+        (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  function generateBrandingShapes(orderId, cx, cy, targetTotalW) {
+    if (!brandingFont) return [];
+    // User requested: in order ID just write number, no "Order #"
+    const rawOrder = (orderId && typeof orderId === 'string') ? orderId.trim() : (orderId ? String(orderId) : '12345');
+    // Extract only digits, or strip any "Order #" prefix
+    const numMatch = rawOrder.match(/\d+/);
+    const orderStr = numMatch ? numMatch[0] : (rawOrder.replace(/^order\s*#?\s*/i, '').trim() || '12345');
+
+    // Baseline sizes
+    const pV0 = brandingFont.getPath('VIVAGIFTS', 0, 0, 100);
+    const bbV0 = pV0.getBoundingBox();
+    const vW0 = bbV0.x2 - bbV0.x1;
+
+    const pO0 = brandingFont.getPath(orderStr, 0, 0, 75);
+    const bbO0 = pO0.getBoundingBox();
+    const oW0 = bbO0.x2 - bbO0.x1;
+
+    const maxW = Math.max(vW0, oW0);
+    const scale = targetTotalW / maxW;
+    const vSize = 100 * scale;
+    const oSize = 75 * scale;
+
+    const pV = brandingFont.getPath('VIVAGIFTS', 0, 0, vSize);
+    const bbV = pV.getBoundingBox();
+    const vH = bbV.y2 - bbV.y1;
+
+    const pO = brandingFont.getPath(orderStr, 0, 0, oSize);
+    const bbO = pO.getBoundingBox();
+    const oH = bbO.y2 - bbO.y1;
+
+    const gap = vH * 0.35;
+    const totalH = vH + gap + oH;
+
+    const topY = cy - totalH / 2 + vH;
+    const botY = topY + gap + oH;
+
+    const pTop = brandingFont.getPath('VIVAGIFTS', cx - (bbV.x1 + bbV.x2) / 2, topY, vSize);
+    const pBot = brandingFont.getPath(orderStr, cx - (bbO.x1 + bbO.x2) / 2, botY, oSize);
+
+    // CRITICAL: Mirror X coordinate along cx so text reads left-to-right when looking from the underside (bed base)
+    [pTop, pBot].forEach(path => {
+      (path.commands || []).forEach(cmd => {
+        if (cmd.x !== undefined) cmd.x = 2 * cx - cmd.x;
+        if (cmd.x1 !== undefined) cmd.x1 = 2 * cx - cmd.x1;
+        if (cmd.x2 !== undefined) cmd.x2 = 2 * cx - cmd.x2;
+      });
+    });
+
+    const allSubs = [...otPathToSubpaths(pTop), ...otPathToSubpaths(pBot)];
+    const sorted = allSubs.map(s => ({
+      points: s.points,
+      area: Math.abs(otPolyArea(s.points))
+    })).sort((a, b) => b.area - a.area);
+
+    const shapes = [];
+    sorted.forEach(item => {
+      let container = null;
+      for (const s of shapes) {
+        if (otPointInPoly(item.points[0], s.points)) {
+          container = s;
+          break;
+        }
+      }
+      if (container) {
+        container.holes.push(item.points);
+      } else {
+        shapes.push({ points: item.points, holes: [] });
+      }
+    });
+
+    return shapes;
+  }
+
+
+const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
   const tabBtn3DStudio = document.getElementById('tabBtn3DStudio');
   const vectorizerView = document.getElementById('vectorizerView');
   const studioView = document.getElementById('studioView');
@@ -224,21 +382,25 @@ document.addEventListener('DOMContentLoaded', () => {
   // Export handlers
   downloadSvgBtn.addEventListener('click', () => {
     if (!currentResult) return;
+    const orderPrompt = prompt('Enter Order ID for filename:', studioState.orderId || '');
+    const outName = (orderPrompt && orderPrompt.trim()) ? `${orderPrompt.trim().replace(/[^a-zA-Z0-9_-]/g, '_')}.svg` : currentResult.filename;
     const blob = new Blob([currentResult.svg], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = currentResult.filename;
+    a.download = outName;
     a.click();
     URL.revokeObjectURL(url);
   });
 
   downloadPngBtn.addEventListener('click', () => {
     if (!currentResult) return;
+    const orderPrompt = prompt('Enter Order ID for filename:', studioState.orderId || '');
+    const outName = (orderPrompt && orderPrompt.trim()) ? `${orderPrompt.trim().replace(/[^a-zA-Z0-9_-]/g, '_')}@4x.png` : currentResult.filename.replace('.svg', '@4x.png');
     rasterizeSvgToPng(currentResult.svg, currentResult.width * 4, currentResult.height * 4, (dataUrl) => {
       const a = document.createElement('a');
       a.href = dataUrl;
-      a.download = currentResult.filename.replace('.svg', '@4x.png');
+      a.download = outName;
       a.click();
     });
   });
@@ -506,6 +668,7 @@ document.addEventListener('DOMContentLoaded', () => {
         autoSolidifyPlates: studioState.autoSolidifyPlates,
         analysis: studioState.analysis,
         raisedTextDetected: studioState.raisedTextDetected,
+        orderId: studioState.orderId || '',
         updatedAt: Date.now()
       };
 
@@ -658,6 +821,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   loadHistoryFromStorage();
+  ensureBrandingFont().then(() => {
+    console.log('[Branding] Font preloaded successfully, refreshing 3D base geometry...');
+    if (typeof updateThreeGeometry === 'function' && studioState && studioState.analysis) {
+      updateThreeGeometry(false, false);
+    }
+  });
 
   // ==================== 3D FDM NAMEPLATE STUDIO LOGIC ====================
   const studioDropzone = document.getElementById('studioDropzone');
@@ -706,6 +875,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const dismissGuideModal = document.getElementById('dismissGuideModal');
   const copyGuideTextBtn = document.getElementById('copyGuideTextBtn');
 
+  // Order ID Modal Elements
+  const orderIdModal = document.getElementById('orderIdModal');
+  const exportOrderIdInput = document.getElementById('exportOrderIdInput');
+  const closeOrderIdModal = document.getElementById('closeOrderIdModal');
+  const cancelOrderIdModal = document.getElementById('cancelOrderIdModal');
+  const confirmOrderIdExportBtn = document.getElementById('confirmOrderIdExportBtn');
+  const viewBottom = document.getElementById('viewBottom');
+
   // Multi-merge & combine toolbar elements
   const multiMergeBar = document.getElementById('multiMergeBar');
   const selectedLayersBadge = document.getElementById('selectedLayersBadge');
@@ -742,7 +919,8 @@ document.addEventListener('DOMContentLoaded', () => {
     raisedTextDetected: false,  // true when hole-paths were successfully raised as 3D text
     cameraInitialized: false,
     modelCentered: false,
-    historyId: null
+    historyId: null,
+    orderId: ''
   };
 
   // ==================== UNDO / REDO SYSTEM ====================
@@ -877,6 +1055,9 @@ document.addEventListener('DOMContentLoaded', () => {
     studioState.historyId = historyId || null;
     viewportModelName.textContent = name;
 
+    // Await branding font so debossed branding is guaranteed loaded before initial render
+    await ensureBrandingFont();
+
     studioDropzone.classList.add('hidden');
     studioWorkspace.classList.remove('hidden');
 
@@ -891,6 +1072,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (savedStudioData.solidBase !== undefined) studioState.solidBase = savedStudioData.solidBase;
         if (savedStudioData.autoSolidifyPlates !== undefined) studioState.autoSolidifyPlates = savedStudioData.autoSolidifyPlates;
         if (savedStudioData.raisedTextDetected !== undefined) studioState.raisedTextDetected = savedStudioData.raisedTextDetected;
+        if (savedStudioData.orderId !== undefined) studioState.orderId = savedStudioData.orderId;
+        else if (!studioState.orderId) {
+          const numMatch = name.match(/\d{4,}/);
+          if (numMatch) studioState.orderId = numMatch[0];
+        }
         
         // Deep copy restored layers
         studioState.layers = JSON.parse(JSON.stringify(savedStudioData.layers));
@@ -1978,7 +2164,7 @@ document.addEventListener('DOMContentLoaded', () => {
       };
 
       // Lights
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
       threeScene.add(ambientLight);
 
       const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.85);
@@ -1993,6 +2179,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const rimLight = new THREE.DirectionalLight(0xffffff, 0.6);
       rimLight.position.set(0, 200, 150);
       threeScene.add(rimLight);
+
+      // Light underneath to clearly illuminate debossed branding when viewing Base (Bottom)
+      const bottomLight = new THREE.DirectionalLight(0xffffff, 0.9);
+      bottomLight.position.set(40, -60, -250);
+      threeScene.add(bottomLight);
 
       // Studio grid floor
       const gridHelper = new THREE.GridHelper(300, 30, 0x334155, 0x1e293b);
@@ -2113,12 +2304,24 @@ document.addEventListener('DOMContentLoaded', () => {
     threeControls.update();
   });
 
+  if (viewBottom) {
+    viewBottom.addEventListener('click', () => {
+      setActiveViewBtn(viewBottom);
+      const maxDim = Math.max(studioState.fixedWidthMm || 150, studioState.proportionalHeightMm || 100);
+      threeCamera.position.set(0, 0, -maxDim * 1.65);
+      threeControls.target.set(0, 0, studioState.totalThicknessMm / 2);
+      threeControls.update();
+    });
+  }
+
   btnResetCamera.addEventListener('click', () => {
     viewPerspective.click();
   });
 
   function setActiveViewBtn(btn) {
-    [viewPerspective, viewTop, viewFront].forEach(b => b.classList.remove('active'));
+    [viewPerspective, viewTop, viewFront, viewBottom].forEach(b => {
+      if (b) b.classList.remove('active');
+    });
     btn.classList.add('active');
   }
 
@@ -2221,7 +2424,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateInspectHud(targetIdx);
   }
 
-  // Update extruded 3D meshes in Three.js (camera and viewport stay stable during live edits)
+    // Update extruded 3D meshes in Three.js (camera and viewport stay stable during live edits)
   function updateThreeGeometry(resetCamera = false, showLoader = false) {
     if (!studioState.analysis || !threeRootGroup) return;
 
@@ -2255,6 +2458,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const ownExtrudeDepth = layerStepThick;
       runningZ += layerStepThick;
 
+      let masterDebossShapes = [];
+
       const layerGroup = new THREE.Group();
       layerGroup.userData = { baseZ: ownZStart, layerIndex: idx };
 
@@ -2265,18 +2470,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (isBase) {
         // 1. Base Layer: extrude foundation plate from Z = 0 to baseThickness
-        // Always build base paths using all layers when solidBase is on,
-        // so the base is 100% solid foundation under all layers and borders.
+        // Use the base layer's own paths so upper artwork layers are not duplicated inside the base
         let basePathsHtml = '';
-        if (studioState.solidBase) {
+        if (layer.paths && layer.paths.length > 0) {
+          layer.paths.forEach(rawD => {
+            basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
+          });
+        } else if (studioState.solidBase) {
           studioState.layers.forEach(l => {
             (l.paths || []).forEach(rawD => {
               basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
             });
-          });
-        } else {
-          (layer.paths || []).forEach(rawD => {
-            basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
           });
         }
         const baseSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
@@ -2324,22 +2528,197 @@ document.addEventListener('DOMContentLoaded', () => {
           });
         });
 
-        allBaseShapes.forEach(shape => {
+        // 1. Identify the bottom rectangular foundation plate for branding placement
+        // User requirements: debossing should be small, inside the base only not going outside, height 2 layers only (0.40mm), bottom center
+        const baseShapeMetrics = allBaseShapes.map((sh, sIdx) => {
+          let sMinX = Infinity, sMaxX = -Infinity, sMinY = Infinity, sMaxY = -Infinity;
+          const sPoints = sh.getPoints ? sh.getPoints() : [];
+          sPoints.forEach(p => {
+            if (p.x < sMinX) sMinX = p.x;
+            if (p.x > sMaxX) sMaxX = p.x;
+            if (p.y < sMinY) sMinY = p.y;
+            if (p.y > sMaxY) sMaxY = p.y;
+          });
+          const sW = (sMaxX > sMinX) ? (sMaxX - sMinX) : 0;
+          const sH = (sMaxY > sMinY) ? (sMaxY - sMinY) : 0;
+          return {
+            shapeIdx: sIdx,
+            shape: sh,
+            sMinX, sMaxX, sMinY, sMaxY,
+            sW, sH,
+            sCx: (sMinX + sMaxX) / 2,
+            sCy: (sMinY + sMaxY) / 2,
+            aspect: sW / Math.max(1, sH)
+          };
+        });
+
+        // Find the true wide rectangular base stand plate (highest sMaxY in SVG space, wide aspect ratio)
+        let bottomPlate = null;
+        let maxPlateScore = -Infinity;
+        baseShapeMetrics.forEach(m => {
+          if (m.sW < 100 || m.sH < 15) return;
+          // Heavily reward highest sMaxY (bottom of canvas in SVG) and wide aspect ratio
+          const score = (m.sMaxY * 4) + m.sW + (m.aspect > 1.8 ? 2000 : 0);
+          if (score > maxPlateScore) {
+            maxPlateScore = score;
+            bottomPlate = m;
+          }
+        });
+
+        if (!bottomPlate && baseShapeMetrics.length > 0) {
+          bottomPlate = baseShapeMetrics[0];
+        }
+
+        // Filter out inner duplicate/cutout shapes that are completely enclosed inside another larger shape
+        const uniqueBaseShapes = [];
+        allBaseShapes.forEach((sh, i) => {
+          const mi = baseShapeMetrics[i];
+          let isContainedInsideOther = false;
+          for (let j = 0; j < allBaseShapes.length; j++) {
+            if (i === j) continue;
+            const mj = baseShapeMetrics[j];
+            if (mj.sW > mi.sW && mj.sH > mi.sH &&
+                mi.sMinX >= mj.sMinX - 2 && mi.sMaxX <= mj.sMaxX + 2 &&
+                mi.sMinY >= mj.sMinY - 2 && mi.sMaxY <= mj.sMaxY + 2) {
+              isContainedInsideOther = true;
+              break;
+            }
+          }
+          if (!isContainedInsideOther) {
+            uniqueBaseShapes.push({ shape: sh, metric: mi });
+          }
+        });
+
+        // Generate master debossed branding shapes ONCE
+        masterDebossShapes = [];
+        let brandBBox = null;
+        const currentScale = totalW_mm / (studioState.analysis.width || 1536);
+
+        if (isBase && brandingFont && bottomPlate) {
+          const brandCx = bottomPlate.sCx;
+          // Shift text up: half of previous offset
+          const brandCy = bottomPlate.sCy - bottomPlate.sH * 0.075 - (7.5 / currentScale);
+          // Text size: 45% of plate width, 8mm margins, max 48mm — good readability without being too bold
+          const plateMarginSvg = 8 / currentScale;
+          const targetWInSvg = Math.min(bottomPlate.sW * 0.45, bottomPlate.sW - 2 * plateMarginSvg, (48 / currentScale));
+          masterDebossShapes = generateBrandingShapes(studioState.orderId, brandCx, brandCy, targetWInSvg);
+          if (masterDebossShapes.length > 0) {
+            let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
+            masterDebossShapes.forEach(b => b.points.forEach(p => {
+              if (p.x < bMinX) bMinX = p.x;
+              if (p.x > bMaxX) bMaxX = p.x;
+              if (p.y < bMinY) bMinY = p.y;
+              if (p.y > bMaxY) bMaxY = p.y;
+            }));
+            brandBBox = { bMinX, bMaxX, bMinY, bMaxY };
+          }
+        }
+
+        // Height is strictly 2 layers: exactly 0.40mm deep!
+        const debossDepth = 0.40;
+        const remainingBaseDepth = Math.max(0.10, ownExtrudeDepth - debossDepth);
+        let islandsAdded = false;
+
+        uniqueBaseShapes.forEach(({ shape, metric }) => {
           const mat = new THREE.MeshStandardMaterial({
             color: new THREE.Color(matColor),
             roughness: 0.45, metalness: 0.05,
-            wireframe: studioState.wireframe3d
-          });
-          const geom = new THREE.ExtrudeGeometry(shape, {
-            depth: ownExtrudeDepth,
-            bevelEnabled: false,
-            steps: 1,
-            curveSegments: 6
-          });
-          const mesh = new THREE.Mesh(geom, mat);
-          mesh.position.z = 0;
-          mesh.castShadow = true; mesh.receiveShadow = true;
-          layerGroup.add(mesh);
+            wireframe: studioState.wireframe3d, side: THREE.DoubleSide });
+
+          // Does this shape contain or overlap the branding region?
+          const isTargetPlate = (bottomPlate && metric.shapeIdx === bottomPlate.shapeIdx);
+          const overlapsBrand = isTargetPlate || (masterDebossShapes.length > 0 && brandBBox &&
+            metric.sMinX <= brandBBox.bMaxX && metric.sMaxX >= brandBBox.bMinX &&
+            metric.sMinY <= brandBBox.bMaxY && metric.sMaxY >= brandBBox.bMinY);
+
+          if (overlapsBrand) {
+            // Cut holes from this base shape so it NEVER blocks the debossed text at Z=0
+            const debossedShape = shape.clone();
+            masterDebossShapes.forEach(b => {
+              let outer = b.points;
+              if (otPolyArea(outer) > 0) outer = outer.slice().reverse();
+              debossedShape.holes.push(new THREE.Path(outer.map(p => new THREE.Vector2(p.x, p.y))));
+            });
+
+            // Add inner letter islands (A, R, D, O, 0, 8, 6, etc.) as solid physical pillars
+            if (!islandsAdded) {
+              islandsAdded = true;
+              masterDebossShapes.forEach(b => {
+                b.holes.forEach(island => {
+                  let isl = island;
+                  if (otPolyArea(isl) < 0) isl = isl.slice().reverse();
+                  const islShape = new THREE.Shape(isl.map(p => new THREE.Vector2(p.x, p.y)));
+                  const islGeom = new THREE.ExtrudeGeometry(islShape, {
+                    depth: debossDepth,
+                    bevelEnabled: false,
+                    steps: 1,
+                    curveSegments: 8
+                  });
+                  const islMesh = new THREE.Mesh(islGeom, mat);
+                  islMesh.position.z = 0;
+                  islMesh.castShadow = true;
+                  islMesh.receiveShadow = true;
+                  // DO NOT set isVisualAccent: this mesh MUST be exported to STL/3MF so counter islands (A, 8, 6) physically exist
+                  layerGroup.add(islMesh);
+                });
+              });
+
+              // High-contrast dark charcoal deboss cavity ceiling for razor-sharp visual clarity in Web 3D Viewer!
+              masterDebossShapes.forEach(b => {
+                let outer = b.points;
+                if (otPolyArea(outer) < 0) outer = outer.slice().reverse();
+                const cavShape = new THREE.Shape(outer.map(p => new THREE.Vector2(p.x, p.y)));
+                b.holes.forEach(island => {
+                  let isl = island;
+                  if (otPolyArea(isl) > 0) isl = isl.slice().reverse();
+                  cavShape.holes.push(new THREE.Path(isl.map(p => new THREE.Vector2(p.x, p.y))));
+                });
+                const cavGeom = new THREE.ShapeGeometry(cavShape);
+                const cavMat = new THREE.MeshBasicMaterial({ color: 0x181818, side: THREE.DoubleSide });
+                const cavMesh = new THREE.Mesh(cavGeom, cavMat);
+                cavMesh.position.z = debossDepth - 0.005; // Placed at ceiling of deboss cavity facing down
+                cavMesh.userData.isVisualAccent = true; // Mark as visual accent to exclude from physical manufacturing mesh
+                layerGroup.add(cavMesh);
+              });
+            }
+
+            const debossGeom = new THREE.ExtrudeGeometry(debossedShape, {
+              depth: debossDepth,
+              bevelEnabled: false,
+              steps: 1,
+              curveSegments: 6
+            });
+            const debossMesh = new THREE.Mesh(debossGeom, mat);
+            debossMesh.position.z = 0;
+            debossMesh.castShadow = true;
+            debossMesh.receiveShadow = true;
+            layerGroup.add(debossMesh);
+
+            if (remainingBaseDepth > 0.05) {
+              const solidUpperGeom = new THREE.ExtrudeGeometry(shape, {
+                depth: remainingBaseDepth,
+                bevelEnabled: false,
+                steps: 1,
+                curveSegments: 6
+              });
+              const solidUpperMesh = new THREE.Mesh(solidUpperGeom, mat);
+              solidUpperMesh.position.z = debossDepth;
+              solidUpperMesh.castShadow = true;
+              solidUpperMesh.receiveShadow = true;
+              layerGroup.add(solidUpperMesh);
+            }
+          } else {
+            const geom = new THREE.ExtrudeGeometry(shape, {
+              depth: ownExtrudeDepth,
+              bevelEnabled: false,
+              steps: 1,
+              curveSegments: 6
+            });
+            const mesh = new THREE.Mesh(geom, mat);
+            mesh.position.z = 0;
+            mesh.castShadow = true; mesh.receiveShadow = true;
+            layerGroup.add(mesh);
+          }
         });
       } else {
         // 2. Upper layers: sequential heights along Z, supported underneath so nothing hangs in air
@@ -2405,8 +2784,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const mat = new THREE.MeshStandardMaterial({
             color: new THREE.Color(matColor),
             roughness: 0.45, metalness: 0.05,
-            wireframe: studioState.wireframe3d
-          });
+            wireframe: studioState.wireframe3d, side: THREE.DoubleSide });
           const geom = new THREE.ExtrudeGeometry(shape, {
             depth: ownExtrudeDepth,
             bevelEnabled: false,
@@ -2434,6 +2812,26 @@ document.addEventListener('DOMContentLoaded', () => {
         name: layer.name
       };
 
+      if (isBase && masterDebossShapes.length > 0) {
+        // Transform SVG deboss contours into 3D space (mm) for the export safety filter
+        const toWorld = (p) => {
+          const wx = (p.x * scale) - (totalW_mm / 2);
+          const wy = (-p.y * scale) + ((svgH * scale) / 2);
+          return { x: wx, y: wy };
+        };
+        const debossPolysWorld = masterDebossShapes.map(b => ({
+          points: b.points.map(toWorld),
+          holes: (b.holes || []).map(h => h.map(toWorld))
+        }));
+        let wMinX = Infinity, wMaxX = -Infinity, wMinY = Infinity, wMaxY = -Infinity;
+        debossPolysWorld.forEach(b => b.points.forEach(p => {
+          if (p.x < wMinX) wMinX = p.x; if (p.x > wMaxX) wMaxX = p.x;
+          if (p.y < wMinY) wMinY = p.y; if (p.y > wMaxY) wMaxY = p.y;
+        }));
+        layerGroup.userData.debossPolysWorld = debossPolysWorld;
+        layerGroup.userData.debossBBoxWorld = { minX: wMinX, maxX: wMaxX, minY: wMinY, maxY: wMaxY };
+      }
+
       threeRootGroup.add(layerGroup);
       threeLayerMeshes.push(layerGroup);
     });
@@ -2453,6 +2851,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const center = box.getCenter(new THREE.Vector3());
     threeRootGroup.position.x = -center.x;
     threeRootGroup.position.y = -center.y;
+
+    // Shift deboss world contours by the auto-center root offset
+    if (threeLayerMeshes[0] && threeLayerMeshes[0].userData && threeLayerMeshes[0].userData.debossPolysWorld) {
+      const polys = threeLayerMeshes[0].userData.debossPolysWorld;
+      polys.forEach(b => {
+        b.points.forEach(p => { p.x -= center.x; p.y -= center.y; });
+        b.holes.forEach(h => h.forEach(p => { p.x -= center.x; p.y -= center.y; }));
+      });
+      const bbox = threeLayerMeshes[0].userData.debossBBoxWorld;
+      if (bbox) {
+        bbox.minX -= center.x; bbox.maxX -= center.x;
+        bbox.minY -= center.y; bbox.maxY -= center.y;
+      }
+    }
 
     // Adjust camera to frame model nicely (only once on load or explicit reset)
     if (!studioState.cameraInitialized || resetCamera) {
@@ -2499,9 +2911,81 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ==================== MANUFACTURING EXPORT LOGIC ====================
-  btnExportZip.addEventListener('click', () => triggerExport('zip'));
-  if (btnExport3mf) btnExport3mf.addEventListener('click', () => triggerExport('3mf'));
-  btnExportCombined.addEventListener('click', () => triggerExport('combined'));
+  let pendingExportFormat = null;
+
+  function promptOrderIdForExport(format) {
+    if (!studioState.svg || studioState.layers.length === 0) return;
+    pendingExportFormat = format;
+    if (orderIdModal) {
+      if (exportOrderIdInput) {
+        exportOrderIdInput.value = studioState.orderId || '';
+      }
+      orderIdModal.classList.remove('hidden');
+      setTimeout(() => {
+        if (exportOrderIdInput) {
+          exportOrderIdInput.focus();
+          exportOrderIdInput.select();
+        }
+      }, 50);
+    } else {
+      const promptVal = prompt('Enter Order ID for VIVAGIFTS branding & file name:', studioState.orderId || '');
+      if (promptVal !== null) {
+        studioState.orderId = promptVal.trim();
+        triggerExport(format);
+      }
+    }
+  }
+
+  if (closeOrderIdModal) {
+    closeOrderIdModal.addEventListener('click', () => {
+      if (orderIdModal) orderIdModal.classList.add('hidden');
+      pendingExportFormat = null;
+    });
+  }
+
+  if (cancelOrderIdModal) {
+    cancelOrderIdModal.addEventListener('click', () => {
+      if (orderIdModal) orderIdModal.classList.add('hidden');
+      pendingExportFormat = null;
+    });
+  }
+
+  if (confirmOrderIdExportBtn) {
+    confirmOrderIdExportBtn.addEventListener('click', async () => {
+      const orderVal = exportOrderIdInput ? exportOrderIdInput.value.trim() : '';
+      if (!orderVal) {
+        alert('Please enter an Order ID before exporting.');
+        if (exportOrderIdInput) exportOrderIdInput.focus();
+        return;
+      }
+      studioState.orderId = orderVal;
+      if (orderIdModal) orderIdModal.classList.add('hidden');
+
+      // Update 3D viewport geometry so debossed branding is immediately generated on the base layer
+      await ensureBrandingFont();
+      updateThreeGeometry(false, false);
+
+      const fmt = pendingExportFormat || '3mf';
+      pendingExportFormat = null;
+      triggerExport(fmt);
+    });
+  }
+
+  if (exportOrderIdInput) {
+    exportOrderIdInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        confirmOrderIdExportBtn?.click();
+      } else if (e.key === 'Escape') {
+        if (orderIdModal) orderIdModal.classList.add('hidden');
+        pendingExportFormat = null;
+      }
+    });
+  }
+
+  btnExportZip.addEventListener('click', () => promptOrderIdForExport('zip'));
+  if (btnExport3mf) btnExport3mf.addEventListener('click', () => promptOrderIdForExport('3mf'));
+  btnExportCombined.addEventListener('click', () => promptOrderIdForExport('combined'));
   btnViewGuide.addEventListener('click', () => openFilamentGuide());
 
   function extractIndexedMeshFromGroup(group) {
@@ -2510,8 +2994,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const triangleIndices = [];
     const vertexMap = new Map();
 
+    const isBaseLayer = (group.userData && group.userData.layerIndex === 0);
+    const debossPolys = isBaseLayer ? group.userData.debossPolysWorld : null;
+    const debossBBox = isBaseLayer ? group.userData.debossBBoxWorld : null;
+
     group.traverse(child => {
       if (child.isMesh && child.geometry) {
+        // Skip visual helper accents (e.g. high-contrast deboss cavity ceiling for web viewer)
+        if (child.userData && child.userData.isVisualAccent) return;
+
         const geom = child.geometry;
         const pos = geom.attributes.position;
         if (!pos) return;
@@ -2535,6 +3026,38 @@ document.addEventListener('DOMContentLoaded', () => {
           return idx;
         }
 
+        // Helper to check if a triangle is a flat bottom face inside the deboss void
+        function isDebossVoidTriangle(v1_idx, v2_idx, v3_idx) {
+          if (!debossPolys || !debossBBox) return false;
+          const vert1 = verticesList[v1_idx], vert2 = verticesList[v2_idx], vert3 = verticesList[v3_idx];
+          // Only filter bottom-facing horizontal triangles (Z < 0.395mm); keep vertical cavity walls and ceiling
+          if (Math.max(vert1.z, vert2.z, vert3.z) >= 0.395) return false;
+
+          const cx = (vert1.x + vert2.x + vert3.x) / 3;
+          const cy = (vert1.y + vert2.y + vert3.y) / 3;
+
+          // Quick bounding box check
+          if (cx < debossBBox.minX || cx > debossBBox.maxX || cy < debossBBox.minY || cy > debossBBox.maxY) {
+            return false;
+          }
+
+          // Point in deboss polygon test
+          for (let pIdx = 0; pIdx < debossPolys.length; pIdx++) {
+            const poly = debossPolys[pIdx];
+            if (otPointInPoly({ x: cx, y: cy }, poly.points)) {
+              let inIsland = false;
+              for (let hIdx = 0; hIdx < poly.holes.length; hIdx++) {
+                if (otPointInPoly({ x: cx, y: cy }, poly.holes[hIdx])) {
+                  inIsland = true;
+                  break;
+                }
+              }
+              if (!inIsland) return true; // Triangle falls inside deboss void!
+            }
+          }
+          return false;
+        }
+
         const index = geom.index;
         if (index) {
           for (let i = 0; i < index.count; i += 3) {
@@ -2548,6 +3071,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (flipWinding) { const tmp = v2; v2 = v3; v3 = tmp; }
             if (v1 !== v2 && v2 !== v3 && v1 !== v3) {
+              if (isDebossVoidTriangle(v1, v2, v3)) {
+                continue; // Skip triangle that would block the hollow deboss void!
+              }
               triangleIndices.push([v1, v2, v3]);
             }
           }
@@ -2559,6 +3085,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (flipWinding) { const tmp = v2; v2 = v3; v3 = tmp; }
             if (v1 !== v2 && v2 !== v3 && v1 !== v3) {
+              if (isDebossVoidTriangle(v1, v2, v3)) {
+                continue; // Skip triangle that would block the hollow deboss void!
+              }
               triangleIndices.push([v1, v2, v3]);
             }
           }
@@ -2827,7 +3356,10 @@ ${meshObjectsXml}${assemblyObjectXml}  </resources>
       });
       threeRootGroup.updateMatrixWorld(true);
 
-      const jobName = (studioState.jobName || 'Nameplate').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const rawJob = (studioState.orderId && studioState.orderId.trim()) 
+        ? studioState.orderId.trim() 
+        : (studioState.jobName || 'Nameplate');
+      const jobName = rawJob.replace(/[^a-zA-Z0-9_-]/g, '_');
       const fixedWidthMm = studioState.fixedWidthMm || 150.0;
       const totalThicknessMm = studioState.totalThicknessMm || 10.0;
       const baseLayer = studioState.layers.find(l => l.role === 'base') || studioState.layers[0];
@@ -2898,12 +3430,12 @@ ${meshObjectsXml}${assemblyObjectXml}  </resources>
         spec.triangles.forEach(t => allTriangles.push(t));
       });
       const combinedStlBlob = trianglesToBinaryStl(allTriangles, `${jobName} Combined 150mm`);
-      const combinedStlFilename = `${jobName}_Combined_150mm.stl`;
+      const combinedStlFilename = `${jobName}.stl`;
       const combinedStlUrl = URL.createObjectURL(combinedStlBlob);
 
       // 3. Generate Native BambuLab .3MF Project
       const threeMfBlob = await generateBambu3mf(layerPrintSpecs, window.JSZip, jobName);
-      const threeMfFilename = `${jobName}_150mm.3mf`;
+      const threeMfFilename = `${jobName}.3mf`;
       const threeMfUrl = URL.createObjectURL(threeMfBlob);
 
       // 4. Generate Filament Swap Guide text
@@ -2950,7 +3482,7 @@ ${meshObjectsXml}${assemblyObjectXml}  </resources>
         compression: 'DEFLATE',
         compressionOptions: { level: 6 }
       });
-      const packageZipFilename = `${jobName}_BambuLab_Package.zip`;
+      const packageZipFilename = `${jobName}.zip`;
       const packageZipUrl = URL.createObjectURL(packageZipBlob);
 
       // Store in studioState for guide modal & re-downloads

@@ -15,6 +15,7 @@
   <script src="libs/OrbitControls.js"></script>
   <script src="libs/SVGLoader.js"></script>
   <script src="libs/jszip.min.js"></script>
+  <script src="libs/opentype.min.js"></script>
 </head>
 <body>
   <div class="glow-bg"></div>
@@ -519,6 +520,7 @@
                 <button class="btn-tool active" id="viewPerspective" title="3D Perspective Angle">3D</button>
                 <button class="btn-tool" id="viewFront" title="Straight Front View">Front</button>
                 <button class="btn-tool" id="viewTop" title="Top Down View">Top</button>
+                <button class="btn-tool" id="viewBottom" title="Bottom View (Inspect Debossed Branding)">Base (Bottom)</button>
               </div>
 
               <div class="divider-v"></div>
@@ -605,12 +607,56 @@
     </div>
   </div>
 
+  <!-- Order ID Modal for Debossed Branding & File Naming -->
+  <div id="orderIdModal" class="modal-backdrop hidden">
+    <div class="modal-card" style="max-width: 480px;">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+              <line x1="12" y1="22.08" x2="12" y2="12"></line>
+            </svg>
+          </div>
+          <div>
+            <h3>Enter Order ID</h3>
+            <p>Embeds VIVAGIFTS branding & Order ID debossed on the base layer</p>
+          </div>
+        </div>
+        <button id="closeOrderIdModal" class="btn-icon">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 1.5rem;">
+        <label for="exportOrderIdInput" style="display:block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem; color: #e2e8f0;">
+          Order ID:
+        </label>
+        <input 
+          type="text" 
+          id="exportOrderIdInput" 
+          placeholder="e.g. 59689 or ORD-1042" 
+          autocomplete="off"
+          style="width: 100%; padding: 0.75rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: #fff; font-size: 1rem; font-family: var(--font-mono); outline: none; transition: border-color 0.2s;"
+        />
+        <div style="margin-top: 0.85rem; font-size: 0.78rem; line-height: 1.45; color: var(--text-muted); background: rgba(255,255,255,0.03); padding: 10px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.06);">
+          🏷️ <strong>Base Layer Debossing Preview:</strong><br>
+          • <strong>Line 1:</strong> <code>VIVAGIFTS</code> (centered brand hallmark)<br>
+          • <strong>Line 2:</strong> <code>Order #&lt;order-id&gt;</code> (sharp 0.6mm deboss)<br>
+          • Downloaded file will be named <code>&lt;order-id&gt;.3mf</code>, <code>&lt;order-id&gt;.stl</code>, etc.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="cancelOrderIdModal" class="btn btn-secondary">Cancel</button>
+        <button id="confirmOrderIdExportBtn" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981, #059669); border-color: #10b981;">Confirm & Export</button>
+      </div>
+    </div>
+  </div>
+
     <!-- Footer -->
     <footer class="app-footer">
       <p>Vectorizer.AI Vector Extraction Engine • Full Bezier Geometry & Vector Interface Reconstruction • <span style="color:var(--primary); font-weight:700;">Version 3.1.1</span></p>
     </footer>
   </div>
 
-  <script src="app.js?v=3.1.1"></script>
+  <script src="app.js?v=4.0.0"></script>
 </body>
 </html>
