@@ -2528,9 +2528,27 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           });
         });
 
-        // 1. Identify the bottom rectangular foundation plate for branding placement
-        // User requirements: debossing should be small, inside the base only not going outside, height 2 layers only (0.40mm), bottom center
-        const baseShapeMetrics = allBaseShapes.map((sh, sIdx) => {
+        // 1. Identify the bottom rectangular foundation plate for branding placement.
+        // IMPORTANT: Always use ONLY the base layer's own paths for bottomPlate detection,
+        // even when solidBase unions all layers for extrusion. This prevents tiny letter/detail
+        // shapes from upper layers being mistakenly picked as the target plate (which would make
+        // branding tiny because their sH is tiny).
+        const baseOwnPathsHtml = (layer.paths || []).map(rawD =>
+          `<path fill="${layer.color}" d="${rawD}" />`).join('');
+        const baseOwnSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
+          <g fill="${layer.color}">${baseOwnPathsHtml}</g>
+        </svg>`;
+        const baseOwnSvgData = loader.parse(baseOwnSvgStr);
+        const baseOwnShapes = [];
+        baseOwnSvgData.paths.forEach(svgPath => {
+          const shapes = THREE.SVGLoader.createShapes(svgPath);
+          shapes.forEach(shape => {
+            const pts = shape.getPoints ? shape.getPoints() : [];
+            if (pts.length >= 3) baseOwnShapes.push(shape);
+          });
+        });
+
+        const baseShapeMetrics = baseOwnShapes.map((sh, sIdx) => {
           let sMinX = Infinity, sMaxX = -Infinity, sMinY = Infinity, sMaxY = -Infinity;
           const sPoints = sh.getPoints ? sh.getPoints() : [];
           sPoints.forEach(p => {
@@ -2571,9 +2589,21 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
 
         // When solidBase is ON: include ALL shapes (don't filter out contained ones — the circle + rectangle + details must all be present)
         // When solidBase is OFF: filter out shapes fully enclosed in a larger shape (SVG winding would handle these as holes, so they're duplicates)
+        // NOTE: uniqueBaseShapes uses allBaseShapes (which may be unioned all-layers) while baseShapeMetrics uses baseOwnShapes (base layer only).
+        // So we compute per-shape metrics on-the-fly here for the containment filter.
+        const allBaseMetrics = allBaseShapes.map(sh => {
+          let sMinX = Infinity, sMaxX = -Infinity, sMinY = Infinity, sMaxY = -Infinity;
+          (sh.getPoints ? sh.getPoints() : []).forEach(p => {
+            if (p.x < sMinX) sMinX = p.x; if (p.x > sMaxX) sMaxX = p.x;
+            if (p.y < sMinY) sMinY = p.y; if (p.y > sMaxY) sMaxY = p.y;
+          });
+          const sW = sMaxX > sMinX ? sMaxX - sMinX : 0;
+          const sH = sMaxY > sMinY ? sMaxY - sMinY : 0;
+          return { sMinX, sMaxX, sMinY, sMaxY, sW, sH, shapeIdx: -1 };
+        });
         const uniqueBaseShapes = [];
         allBaseShapes.forEach((sh, i) => {
-          const mi = baseShapeMetrics[i];
+          const mi = allBaseMetrics[i];
           if (studioState.solidBase) {
             // Include every shape — the base must be a true union of all layer silhouettes
             uniqueBaseShapes.push({ shape: sh, metric: mi });
@@ -2581,7 +2611,7 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
             let isContainedInsideOther = false;
             for (let j = 0; j < allBaseShapes.length; j++) {
               if (i === j) continue;
-              const mj = baseShapeMetrics[j];
+              const mj = allBaseMetrics[j];
               if (mj.sW > mi.sW && mj.sH > mi.sH &&
                   mi.sMinX >= mj.sMinX - 2 && mi.sMaxX <= mj.sMaxX + 2 &&
                   mi.sMinY >= mj.sMinY - 2 && mi.sMaxY <= mj.sMaxY + 2) {
