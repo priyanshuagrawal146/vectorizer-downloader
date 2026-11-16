@@ -2795,21 +2795,54 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           // 1. Is this the primary target plate designated for debossed branding?
           const isTargetPlate = (targetPlate && metric && metric.shapeIdx === targetPlate.shapeIdx);
 
-          // 2. Or is this another substantial plate that fully encloses the entire branding bounding box?
+          // 2. Or does this shape fully enclose the entire branding bounding box?
           const fullyContainsBrand = (masterDebossShapes.length > 0 && brandBBox && metric &&
             metric.sMinX <= brandBBox.bMinX && metric.sMaxX >= brandBBox.bMaxX &&
             metric.sMinY <= brandBBox.bMinY && metric.sMaxY >= brandBBox.bMaxY);
 
-          // 3. Or is this a small upper-layer detail path inside the deboss region that could fill in the lettering?
+          // 3. Find all debossed branding glyphs that intersect or fall inside this shape
+          const shapePts = shape.getPoints ? shape.getPoints() : [];
+          let matchingGlyphs = [];
+          if (isTargetPlate || fullyContainsBrand) {
+            matchingGlyphs = masterDebossShapes;
+          } else if (masterDebossShapes.length > 0 && shapePts.length >= 3 && brandBBox && metric &&
+                     metric.sMinX <= brandBBox.bMaxX && metric.sMaxX >= brandBBox.bMinX &&
+                     metric.sMinY <= brandBBox.bMaxY && metric.sMaxY >= brandBBox.bMinY) {
+            masterDebossShapes.forEach(b => {
+              let gCx = 0, gCy = 0;
+              for (let pi = 0; pi < b.points.length; pi++) {
+                gCx += b.points[pi].x; gCy += b.points[pi].y;
+              }
+              gCx /= b.points.length; gCy /= b.points.length;
+
+              let hasPtInside = otPointInPoly({ x: gCx, y: gCy }, shapePts);
+              if (!hasPtInside) {
+                // Check sample points along glyph contour
+                const step = Math.max(1, Math.floor(b.points.length / 8));
+                for (let pi = 0; pi < b.points.length; pi += step) {
+                  if (otPointInPoly(b.points[pi], shapePts)) {
+                    hasPtInside = true;
+                    break;
+                  }
+                }
+              }
+              if (hasPtInside) {
+                matchingGlyphs.push(b);
+              }
+            });
+          }
+
+          const hasDebossHoles = (matchingGlyphs.length > 0);
           const isUpperDetailInBrand = (!isOwnBase && masterDebossShapes.length > 0 && brandBBox && metric &&
             (metric.sW * currentScale < 35.0 || metric.sH * currentScale < 15.0) &&
             metric.sMinX <= brandBBox.bMaxX && metric.sMaxX >= brandBBox.bMinX &&
-            metric.sMinY <= brandBBox.bMinY && metric.sMaxY >= brandBBox.bMinY);
+            metric.sMinY <= brandBBox.bMaxY && metric.sMaxY >= brandBBox.bMinY);
 
-          if (isTargetPlate || fullyContainsBrand) {
-            // TARGET STAND / FOUNDATION PLATE: Carve debossed branding holes cleanly at Z=0
+          if (hasDebossHoles) {
+            // This shape (stand plate or overlapping base plate like house) owns debossed branding glyphs!
+            // Carve debossed branding holes cleanly at Z=0
             const debossedShape = shape.clone();
-            masterDebossShapes.forEach(b => {
+            matchingGlyphs.forEach(b => {
               let outer = b.points;
               if (otPolyArea(outer) > 0) outer = outer.slice().reverse();
               debossedShape.holes.push(new THREE.Path(outer.map(p => new THREE.Vector2(p.x, p.y))));
