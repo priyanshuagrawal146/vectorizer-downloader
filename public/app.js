@@ -2677,27 +2677,47 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         let brandBBox = null;
         const currentScale = totalW_mm / (studioState.analysis.width || 1536);
 
-        // Compute overall base bounding box from base layer own shapes
-        let baseBounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
-        baseOwnShapes.forEach(sh => {
-          const pts = sh.getPoints ? sh.getPoints() : [];
-          pts.forEach(p => {
-            if (p.x < baseBounds.minX) baseBounds.minX = p.x;
-            if (p.x > baseBounds.maxX) baseBounds.maxX = p.x;
-            if (p.y < baseBounds.minY) baseBounds.minY = p.y;
-            if (p.y > baseBounds.maxY) baseBounds.maxY = p.y;
-          });
+        // Compute overall base bounding box from ALL shapes in uniqueBaseShapes
+        let allBaseBounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+        uniqueBaseShapes.forEach(({ shape, metric }) => {
+          if (metric) {
+            if (metric.sMinX < allBaseBounds.minX) allBaseBounds.minX = metric.sMinX;
+            if (metric.sMaxX > allBaseBounds.maxX) allBaseBounds.maxX = metric.sMaxX;
+            if (metric.sMinY < allBaseBounds.minY) allBaseBounds.minY = metric.sMinY;
+            if (metric.sMaxY > allBaseBounds.maxY) allBaseBounds.maxY = metric.sMaxY;
+          } else {
+            const pts = shape.getPoints ? shape.getPoints() : [];
+            pts.forEach(p => {
+              if (p.x < allBaseBounds.minX) allBaseBounds.minX = p.x;
+              if (p.x > allBaseBounds.maxX) allBaseBounds.maxX = p.x;
+              if (p.y < allBaseBounds.minY) allBaseBounds.minY = p.y;
+              if (p.y > allBaseBounds.maxY) allBaseBounds.maxY = p.y;
+            });
+          }
         });
 
-        if (isBase && brandingFont && baseOwnShapes.length > 0) {
-          // Horizontally center across base (user requirement: horizontally center across all designs)
-          const brandCx = (bottomPlate && bottomPlate.sW >= (60 / currentScale))
-            ? bottomPlate.sCx
-            : (baseBounds.minX + baseBounds.maxX) / 2;
+        if (isBase && brandingFont && uniqueBaseShapes.length > 0) {
+          // Find the wide rectangular pen stand plate at the bottom of the design
+          // Requirement: centered inside the pen stand base plate across all designs
+          let standPlate = null;
+          let maxStandScore = -Infinity;
+          uniqueBaseShapes.forEach(({ metric, isOwnBase }) => {
+            if (!isOwnBase || !metric) return;
+            const distFromBottomMm = (allBaseBounds.maxY - metric.sMaxY) * currentScale;
+            const standH_mm = metric.sH * currentScale;
+            const standW_mm = metric.sW * currentScale;
+            // Stand plate is at the bottom (within 12mm of bottom edge), wide (>= 40mm), substantial height (>= 15mm), wide aspect
+            if (distFromBottomMm <= 12.0 && standW_mm >= 40.0 && standH_mm >= 15.0 && metric.aspect >= 1.4) {
+              const score = (metric.aspect * 100) + standW_mm - (distFromBottomMm * 20);
+              if (score > maxStandScore) {
+                maxStandScore = score;
+                standPlate = metric;
+              }
+            }
+          });
 
-          // Fixed text width: 48mm across ALL designs (user: "yesterday nght we had this in perfect size and place")
-          // Clamped only if the entire base is narrower than 56mm
-          const baseTotalW_mm = (baseBounds.maxX - baseBounds.minX) * currentScale;
+          // Fixed text width: 48mm across ALL designs (clamped only if entire base is narrower than 56mm)
+          const baseTotalW_mm = (allBaseBounds.maxX - allBaseBounds.minX) * currentScale;
           const targetWidthMm = Math.min(48.0, Math.max(25.0, baseTotalW_mm - 16.0));
           const targetWInSvg = targetWidthMm / currentScale;
 
@@ -2719,22 +2739,17 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           const gap = vH * 0.35;
           const totalTextH_svg = vH + gap + oH;
 
-          // Fixed vertical position: 7.5mm up from bottom edge of base plate
-          // User requirement: "slightly up from the bottom around 5-8mm and this should be fixed postition in all designs... horizontally center and 10mm margin from base"
-          // At 7.5mm offset: text bottom is 7.5mm up, center of order ID line is ~10mm from bottom edge
-          const baseBottomY = bottomPlate ? Math.max(bottomPlate.sMaxY, baseBounds.maxY) : baseBounds.maxY;
-          const bottomMarginMm = 7.5;
-          const bottomMarginSvg = bottomMarginMm / currentScale;
+          // Positioning:
+          // Center horizontally and vertically inside the detected pen stand plate.
+          // If no separate stand plate is detected, center horizontally on the base and place ~20mm from bottom edge.
+          let brandCx = standPlate ? standPlate.sCx : (allBaseBounds.minX + allBaseBounds.maxX) / 2;
+          let brandCy = standPlate ? standPlate.sCy : (allBaseBounds.maxY - (20.0 / currentScale));
 
-          // brandCy is the vertical center of the debossed text block
-          let brandCy = baseBottomY - bottomMarginSvg - (totalTextH_svg / 2);
-
-          // Safety clamp: ensure text top never pokes out the top of the base plate
-          const baseTopY = bottomPlate ? bottomPlate.sMinY : baseBounds.minY;
-          const minSafeCy = baseTopY + (2.0 / currentScale) + (totalTextH_svg / 2);
-          if (brandCy < minSafeCy) {
-            brandCy = minSafeCy;
-          }
+          // Strict boundary clamp: text bottom must stay at least 8.0mm inside the base bottom edge,
+          // and text top must stay at least 5.0mm inside the base top edge.
+          const minSafeCy = allBaseBounds.minY + (totalTextH_svg / 2) + (5.0 / currentScale);
+          const maxSafeCy = allBaseBounds.maxY - (totalTextH_svg / 2) - (8.0 / currentScale);
+          brandCy = Math.max(minSafeCy, Math.min(maxSafeCy, brandCy));
 
           masterDebossShapes = generateBrandingShapes(studioState.orderId, brandCx, brandCy, targetWInSvg);
           if (masterDebossShapes.length > 0) {
