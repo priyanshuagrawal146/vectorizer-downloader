@@ -2538,10 +2538,7 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         baseSvgData.paths.forEach(svgPath => {
           const shapes = THREE.SVGLoader.createShapes(svgPath);
           shapes.forEach(shape => {
-            // Clear inner puzzle cutout holes when Solid Base is on so backing is 100% solid
-            if (studioState.solidBase) {
-              shape.holes = [];
-            }
+            // Preserve genuine hollow gaps (letter counters, keychain holes, gear centers)
             const shapePts = shape.getPoints();
             if (shapePts && shapePts.length >= 3 && cutoutShapes.length > 0) {
               const shapeBox = new THREE.Box2().setFromPoints(shapePts);
@@ -2629,7 +2626,8 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
 
           // Add own-base shapes (isOwnBase: true) with deboss eligibility
           baseOwnShapes.forEach(sh => {
-            sh.holes = []; // Solid fill for solidBase mode
+            // DO NOT wipe holes: letter counters (A, D, O, B, etc.) and hollow loops must remain open.
+            // Target stand plate is solidified cleanly inside isTargetPlate for debossed hallmarks.
             const pts = sh.getPoints ? sh.getPoints() : [];
             if (pts.length < 3) return;
             let sMinX = Infinity, sMaxX = -Infinity, sMinY = Infinity, sMaxY = -Infinity;
@@ -2647,7 +2645,7 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
             });
           });
 
-          // Add shapes from upper layers (isOwnBase: false) — just for solid fill, no deboss
+          // Add shapes from upper layers (isOwnBase: false) — providing solid foundation under upper artwork
           studioState.layers.forEach((l, lIdx) => {
             if (lIdx === 0) return; // skip base layer (already added above)
             const extraHtml = (l.paths || []).map(d => `<path fill="${layer.color}" d="${d}" />`).join('');
@@ -2656,7 +2654,7 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
             const extraSvgData = loader.parse(extraSvgStr);
             extraSvgData.paths.forEach(svgPath => {
               THREE.SVGLoader.createShapes(svgPath).forEach(sh => {
-                sh.holes = []; // Solid fill
+                // DO NOT wipe sh.holes: Preserve letter counter gaps (A, D, O, B, etc.) and hollow loops
                 const pts = sh.getPoints ? sh.getPoints() : [];
                 if (pts.length < 3) return;
                 let sMinX = Infinity, sMaxX = -Infinity, sMinY = Infinity, sMaxY = -Infinity;
@@ -2845,6 +2843,7 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           if (isTargetPlate || fullyContainsBrand) {
             // Target plate / fully containing base plate: owns debossed branding cavity
             const debossedShape = shape.clone();
+            debossedShape.holes = []; // Stand plate base bed is 100% solid flat foundation for debossed hallmarks
             masterDebossShapes.forEach(b => {
               let outer = b.points;
               if (otPolyArea(outer) > 0) outer = outer.slice().reverse();
@@ -2914,7 +2913,9 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
             layerGroup.add(debossMesh);
 
             if (remainingBaseDepth > 0.05) {
-              const solidUpperGeom = new THREE.ExtrudeGeometry(shape, {
+              const solidUpperShape = shape.clone();
+              solidUpperShape.holes = []; // Stand plate upper backing is 100% solid foundation
+              const solidUpperGeom = new THREE.ExtrudeGeometry(solidUpperShape, {
                 depth: remainingBaseDepth,
                 bevelEnabled: false,
                 steps: 1,
