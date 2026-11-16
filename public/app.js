@@ -2786,20 +2786,28 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         const remainingBaseDepth = Math.max(0.10, ownExtrudeDepth - debossDepth);
         let islandsAdded = false;
 
-        uniqueBaseShapes.forEach(({ shape, metric }) => {
+        uniqueBaseShapes.forEach(({ shape, metric, isOwnBase }) => {
           const mat = new THREE.MeshStandardMaterial({
             color: new THREE.Color(matColor),
             roughness: 0.45, metalness: 0.05,
             wireframe: studioState.wireframe3d, side: THREE.DoubleSide });
 
-          // Does this shape contain or overlap the branding region?
+          // 1. Is this the primary target plate designated for debossed branding?
           const isTargetPlate = (targetPlate && metric && metric.shapeIdx === targetPlate.shapeIdx);
-          const overlapsBrand = (masterDebossShapes.length > 0 && brandBBox &&
-            metric.sMinX <= brandBBox.bMaxX && metric.sMaxX >= brandBBox.bMinX &&
-            metric.sMinY <= brandBBox.bMaxY && metric.sMaxY >= brandBBox.bMinY);
 
-          if (isTargetPlate) {
-            // TARGET STAND PLATE: This plate owns the debossed branding!
+          // 2. Or is this another substantial plate that fully encloses the entire branding bounding box?
+          const fullyContainsBrand = (masterDebossShapes.length > 0 && brandBBox && metric &&
+            metric.sMinX <= brandBBox.bMinX && metric.sMaxX >= brandBBox.bMaxX &&
+            metric.sMinY <= brandBBox.bMinY && metric.sMaxY >= brandBBox.bMaxY);
+
+          // 3. Or is this a small upper-layer detail path inside the deboss region that could fill in the lettering?
+          const isUpperDetailInBrand = (!isOwnBase && masterDebossShapes.length > 0 && brandBBox && metric &&
+            (metric.sW * currentScale < 35.0 || metric.sH * currentScale < 15.0) &&
+            metric.sMinX <= brandBBox.bMaxX && metric.sMaxX >= brandBBox.bMinX &&
+            metric.sMinY <= brandBBox.bMinY && metric.sMaxY >= brandBBox.bMinY);
+
+          if (isTargetPlate || fullyContainsBrand) {
+            // TARGET STAND / FOUNDATION PLATE: Carve debossed branding holes cleanly at Z=0
             const debossedShape = shape.clone();
             masterDebossShapes.forEach(b => {
               let outer = b.points;
@@ -2882,10 +2890,9 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
               solidUpperMesh.receiveShadow = true;
               layerGroup.add(solidUpperMesh);
             }
-          } else if (overlapsBrand) {
-            // ANY OTHER SHAPE that overlaps branding:
-            // Extrude ONLY above deboss cavity (Z = debossDepth to ownExtrudeDepth).
-            // It has ZERO presence at Z = 0..debossDepth, so it can NEVER fill in or block any letter!
+          } else if (isUpperDetailInBrand) {
+            // Small upper-layer detail path inside deboss cavity:
+            // Extrude only above deboss depth (Z = debossDepth to ownExtrudeDepth) so it doesn't block letters
             if (remainingBaseDepth > 0.05) {
               const upperGeom = new THREE.ExtrudeGeometry(shape, {
                 depth: remainingBaseDepth,
@@ -2900,7 +2907,7 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
               layerGroup.add(upperMesh);
             }
           } else {
-            // Normal shape not overlapping branding: extrude solid from Z = 0 to ownExtrudeDepth
+            // Normal base foundation shape: extrude solid from Z = 0 to ownExtrudeDepth (100% flat on print bed)
             const geom = new THREE.ExtrudeGeometry(shape, {
               depth: ownExtrudeDepth,
               bevelEnabled: false,
