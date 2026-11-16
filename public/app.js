@@ -2569,23 +2569,29 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           bottomPlate = baseShapeMetrics[0];
         }
 
-        // Filter out inner duplicate/cutout shapes that are completely enclosed inside another larger shape
+        // When solidBase is ON: include ALL shapes (don't filter out contained ones — the circle + rectangle + details must all be present)
+        // When solidBase is OFF: filter out shapes fully enclosed in a larger shape (SVG winding would handle these as holes, so they're duplicates)
         const uniqueBaseShapes = [];
         allBaseShapes.forEach((sh, i) => {
           const mi = baseShapeMetrics[i];
-          let isContainedInsideOther = false;
-          for (let j = 0; j < allBaseShapes.length; j++) {
-            if (i === j) continue;
-            const mj = baseShapeMetrics[j];
-            if (mj.sW > mi.sW && mj.sH > mi.sH &&
-                mi.sMinX >= mj.sMinX - 2 && mi.sMaxX <= mj.sMaxX + 2 &&
-                mi.sMinY >= mj.sMinY - 2 && mi.sMaxY <= mj.sMaxY + 2) {
-              isContainedInsideOther = true;
-              break;
-            }
-          }
-          if (!isContainedInsideOther) {
+          if (studioState.solidBase) {
+            // Include every shape — the base must be a true union of all layer silhouettes
             uniqueBaseShapes.push({ shape: sh, metric: mi });
+          } else {
+            let isContainedInsideOther = false;
+            for (let j = 0; j < allBaseShapes.length; j++) {
+              if (i === j) continue;
+              const mj = baseShapeMetrics[j];
+              if (mj.sW > mi.sW && mj.sH > mi.sH &&
+                  mi.sMinX >= mj.sMinX - 2 && mi.sMaxX <= mj.sMaxX + 2 &&
+                  mi.sMinY >= mj.sMinY - 2 && mi.sMaxY <= mj.sMaxY + 2) {
+                isContainedInsideOther = true;
+                break;
+              }
+            }
+            if (!isContainedInsideOther) {
+              uniqueBaseShapes.push({ shape: sh, metric: mi });
+            }
           }
         });
 
