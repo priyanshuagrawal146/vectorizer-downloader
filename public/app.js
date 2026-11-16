@@ -2529,8 +2529,22 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         });
 
         // 1. Identify the bottom rectangular foundation plate for branding placement
-        // User requirements: debossing should be small, inside the base only not going outside, height 2 layers only (0.40mm), bottom center
-        const baseShapeMetrics = allBaseShapes.map((sh, sIdx) => {
+        // IMPORTANT: Always use ONLY the base layer's own paths to compute baseShapeMetrics and bottomPlate.
+        // Using allBaseShapes (which may include upper layer paths when solidBase=ON) would cause tiny letter
+        // shapes from upper layers to win as bottomPlate → garbled/tiny branding text.
+        const baseOwnSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
+          <g fill="${layer.color}">${(layer.paths || []).map(d => `<path fill="${layer.color}" d="${d}" />`).join('')}</g>
+        </svg>`;
+        const baseOwnSvgData = loader.parse(baseOwnSvgStr);
+        const baseOwnShapes = [];
+        baseOwnSvgData.paths.forEach(svgPath => {
+          THREE.SVGLoader.createShapes(svgPath).forEach(sh => {
+            const pts = sh.getPoints ? sh.getPoints() : [];
+            if (pts.length >= 3) baseOwnShapes.push(sh);
+          });
+        });
+
+        const baseShapeMetrics = baseOwnShapes.map((sh, sIdx) => {
           let sMinX = Infinity, sMaxX = -Infinity, sMinY = Infinity, sMaxY = -Infinity;
           const sPoints = sh.getPoints ? sh.getPoints() : [];
           sPoints.forEach(p => {
@@ -2569,19 +2583,82 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           bottomPlate = baseShapeMetrics[0];
         }
 
-        // When solidBase is ON: include ALL shapes (don't filter out contained ones — the circle + rectangle + details must all be present)
-        // When solidBase is OFF: filter out shapes fully enclosed in a larger shape (SVG winding would handle these as holes, so they're duplicates)
+        // Build uniqueBaseShapes, tagging each with isOwnBase:
+        //   isOwnBase: true  → from base layer's own paths → eligible for deboss treatment
+        //   isOwnBase: false → from upper layers (only added when solidBase=ON for solid fill) → just extrude flat, NO deboss
         const uniqueBaseShapes = [];
-        allBaseShapes.forEach((sh, i) => {
-          const mi = baseShapeMetrics[i];
-          if (studioState.solidBase) {
-            // Include every shape — the base must be a true union of all layer silhouettes
-            uniqueBaseShapes.push({ shape: sh, metric: mi });
-          } else {
+
+        if (studioState.solidBase) {
+          // First: add all base-layer OWN shapes (tagged isOwnBase: true)
+          // We re-use allBaseShapes entries that came from the base layer's own paths.
+          // Since baseSvgData when solidBase=ON includes all layers' paths, we need to identify which
+          // shapes in allBaseShapes are from the base layer. The simplest correct approach: build
+          // uniqueBaseShapes by directly using baseOwnShapes (already parsed) for the own base shapes,
+          // and then separately add each upper layer's shapes tagged isOwnBase: false.
+
+          // Add own-base shapes (isOwnBase: true) with deboss eligibility
+          baseOwnShapes.forEach(sh => {
+            sh.holes = []; // Solid fill for solidBase mode
+            const pts = sh.getPoints ? sh.getPoints() : [];
+            if (pts.length < 3) return;
+            let sMinX = Infinity, sMaxX = -Infinity, sMinY = Infinity, sMaxY = -Infinity;
+            pts.forEach(p => {
+              if (p.x < sMinX) sMinX = p.x;
+              if (p.x > sMaxX) sMaxX = p.x;
+              if (p.y < sMinY) sMinY = p.y;
+              if (p.y > sMaxY) sMaxY = p.y;
+            });
+            const sW = sMaxX - sMinX; const sH = sMaxY - sMinY;
+            uniqueBaseShapes.push({
+              shape: sh,
+              metric: { shapeIdx: uniqueBaseShapes.length, shape: sh, sMinX, sMaxX, sMinY, sMaxY, sW, sH, sCx: (sMinX+sMaxX)/2, sCy: (sMinY+sMaxY)/2, aspect: sW/Math.max(1,sH) },
+              isOwnBase: true
+            });
+          });
+
+          // Add shapes from upper layers (isOwnBase: false) — just for solid fill, no deboss
+          studioState.layers.forEach((l, lIdx) => {
+            if (lIdx === 0) return; // skip base layer (already added above)
+            const extraHtml = (l.paths || []).map(d => `<path fill="${layer.color}" d="${d}" />`).join('');
+            if (!extraHtml) return;
+            const extraSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}"><g fill="${layer.color}">${extraHtml}</g></svg>`;
+            const extraSvgData = loader.parse(extraSvgStr);
+            extraSvgData.paths.forEach(svgPath => {
+              THREE.SVGLoader.createShapes(svgPath).forEach(sh => {
+                sh.holes = []; // Solid fill
+                const pts = sh.getPoints ? sh.getPoints() : [];
+                if (pts.length < 3) return;
+                let sMinX = Infinity, sMaxX = -Infinity, sMinY = Infinity, sMaxY = -Infinity;
+                pts.forEach(p => {
+                  if (p.x < sMinX) sMinX = p.x;
+                  if (p.x > sMaxX) sMaxX = p.x;
+                  if (p.y < sMinY) sMinY = p.y;
+                  if (p.y > sMaxY) sMaxY = p.y;
+                });
+                const sW = sMaxX - sMinX; const sH = sMaxY - sMinY;
+                uniqueBaseShapes.push({
+                  shape: sh,
+                  metric: { shapeIdx: uniqueBaseShapes.length, shape: sh, sMinX, sMaxX, sMinY, sMaxY, sW, sH, sCx: (sMinX+sMaxX)/2, sCy: (sMinY+sMaxY)/2, aspect: sW/Math.max(1,sH) },
+                  isOwnBase: false
+                });
+              });
+            });
+          });
+        } else {
+          // solidBase OFF: use allBaseShapes with containment filter, all tagged isOwnBase: true
+          allBaseShapes.forEach((sh, i) => {
+            const mi = baseShapeMetrics[i] || (() => {
+              const pts = sh.getPoints ? sh.getPoints() : [];
+              let sMinX=Infinity,sMaxX=-Infinity,sMinY=Infinity,sMaxY=-Infinity;
+              pts.forEach(p=>{if(p.x<sMinX)sMinX=p.x;if(p.x>sMaxX)sMaxX=p.x;if(p.y<sMinY)sMinY=p.y;if(p.y>sMaxY)sMaxY=p.y;});
+              const sW=sMaxX-sMinX,sH=sMaxY-sMinY;
+              return {shapeIdx:i,shape:sh,sMinX,sMaxX,sMinY,sMaxY,sW,sH,sCx:(sMinX+sMaxX)/2,sCy:(sMinY+sMaxY)/2,aspect:sW/Math.max(1,sH)};
+            })();
             let isContainedInsideOther = false;
             for (let j = 0; j < allBaseShapes.length; j++) {
               if (i === j) continue;
               const mj = baseShapeMetrics[j];
+              if (!mj) continue;
               if (mj.sW > mi.sW && mj.sH > mi.sH &&
                   mi.sMinX >= mj.sMinX - 2 && mi.sMaxX <= mj.sMaxX + 2 &&
                   mi.sMinY >= mj.sMinY - 2 && mi.sMaxY <= mj.sMaxY + 2) {
@@ -2590,10 +2667,10 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
               }
             }
             if (!isContainedInsideOther) {
-              uniqueBaseShapes.push({ shape: sh, metric: mi });
+              uniqueBaseShapes.push({ shape: sh, metric: mi, isOwnBase: true });
             }
-          }
-        });
+          });
+        }
 
         // Generate master debossed branding shapes ONCE
         masterDebossShapes = [];
@@ -2641,13 +2718,26 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         const remainingBaseDepth = Math.max(0.10, ownExtrudeDepth - debossDepth);
         let islandsAdded = false;
 
-        uniqueBaseShapes.forEach(({ shape, metric }) => {
+        uniqueBaseShapes.forEach(({ shape, metric, isOwnBase }) => {
           const mat = new THREE.MeshStandardMaterial({
             color: new THREE.Color(matColor),
             roughness: 0.45, metalness: 0.05,
             wireframe: studioState.wireframe3d, side: THREE.DoubleSide });
 
-          // Does this shape contain or overlap the branding region?
+          // Extra union shapes (from upper layers, only present when solidBase=ON):
+          // just extrude solidly from 0 to ownExtrudeDepth — no deboss, no brand check
+          if (!isOwnBase) {
+            const geom = new THREE.ExtrudeGeometry(shape, {
+              depth: ownExtrudeDepth, bevelEnabled: false, steps: 1, curveSegments: 6
+            });
+            const mesh = new THREE.Mesh(geom, mat);
+            mesh.position.z = 0;
+            mesh.castShadow = true; mesh.receiveShadow = true;
+            layerGroup.add(mesh);
+            return;
+          }
+
+          // Does this (own-base) shape contain or overlap the branding region?
           const isTargetPlate = (bottomPlate && metric.shapeIdx === bottomPlate.shapeIdx);
           const overlapsBrand = isTargetPlate || (masterDebossShapes.length > 0 && brandBBox &&
             metric.sMinX <= brandBBox.bMaxX && metric.sMaxX >= brandBBox.bMinX &&
