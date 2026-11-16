@@ -84,6 +84,37 @@ document.addEventListener('DOMContentLoaded', () => {
     return inside;
   }
 
+  function clipPolygonHalfPlane(points, val, axis, keepSmaller) {
+    const out = [];
+    const n = points.length;
+    if (n < 3) return out;
+    for (let i = 0; i < n; i++) {
+      const p1 = points[i];
+      const p2 = points[(i + 1) % n];
+      const v1 = (axis === 'x') ? p1.x : p1.y;
+      const v2 = (axis === 'x') ? p2.x : p2.y;
+      const in1 = keepSmaller ? (v1 <= val) : (v1 >= val);
+      const in2 = keepSmaller ? (v2 <= val) : (v2 >= val);
+      if (in1 && in2) {
+        out.push(p2);
+      } else if (in1 && !in2) {
+        const diff = v2 - v1;
+        const t = Math.abs(diff) > 1e-9 ? ((val - v1) / diff) : 0;
+        const ix = (axis === 'x') ? val : (p1.x + t * (p2.x - p1.x));
+        const iy = (axis === 'y') ? val : (p1.y + t * (p2.y - p1.y));
+        out.push({ x: ix, y: iy });
+      } else if (!in1 && in2) {
+        const diff = v2 - v1;
+        const t = Math.abs(diff) > 1e-9 ? ((val - v1) / diff) : 0;
+        const ix = (axis === 'x') ? val : (p1.x + t * (p2.x - p1.x));
+        const iy = (axis === 'y') ? val : (p1.y + t * (p2.y - p1.y));
+        out.push({ x: ix, y: iy });
+        out.push(p2);
+      }
+    }
+    return out;
+  }
+
   function generateBrandingShapes(orderId, cx, cy, targetTotalW) {
     if (!brandingFont) return [];
     // User requested: in order ID just write number, no "Order #"
@@ -2767,6 +2798,9 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
               }
             });
           }
+          if (!targetPlate && bottomPlate) {
+            targetPlate = bottomPlate;
+          }
 
           masterDebossShapes = generateBrandingShapes(studioState.orderId, brandCx, brandCy, targetWInSvg);
           if (masterDebossShapes.length > 0) {
@@ -2786,6 +2820,14 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         const remainingBaseDepth = Math.max(0.10, ownExtrudeDepth - debossDepth);
         let islandsAdded = false;
 
+        const safetyMarginSvg = 1.0 / currentScale; // 1.0mm safety margin around debossed text cavity
+        const brandSafetyBox = (masterDebossShapes.length > 0 && brandBBox) ? {
+          minX: brandBBox.bMinX - safetyMarginSvg,
+          maxX: brandBBox.bMaxX + safetyMarginSvg,
+          minY: brandBBox.bMinY - safetyMarginSvg,
+          maxY: brandBBox.bMaxY + safetyMarginSvg
+        } : null;
+
         uniqueBaseShapes.forEach(({ shape, metric, isOwnBase }) => {
           const mat = new THREE.MeshStandardMaterial({
             color: new THREE.Color(matColor),
@@ -2800,49 +2842,10 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
             metric.sMinX <= brandBBox.bMinX && metric.sMaxX >= brandBBox.bMaxX &&
             metric.sMinY <= brandBBox.bMinY && metric.sMaxY >= brandBBox.bMaxY);
 
-          // 3. Find all debossed branding glyphs that intersect or fall inside this shape
-          const shapePts = shape.getPoints ? shape.getPoints() : [];
-          let matchingGlyphs = [];
           if (isTargetPlate || fullyContainsBrand) {
-            matchingGlyphs = masterDebossShapes;
-          } else if (masterDebossShapes.length > 0 && shapePts.length >= 3 && brandBBox && metric &&
-                     metric.sMinX <= brandBBox.bMaxX && metric.sMaxX >= brandBBox.bMinX &&
-                     metric.sMinY <= brandBBox.bMaxY && metric.sMaxY >= brandBBox.bMinY) {
-            masterDebossShapes.forEach(b => {
-              let gCx = 0, gCy = 0;
-              for (let pi = 0; pi < b.points.length; pi++) {
-                gCx += b.points[pi].x; gCy += b.points[pi].y;
-              }
-              gCx /= b.points.length; gCy /= b.points.length;
-
-              let hasPtInside = otPointInPoly({ x: gCx, y: gCy }, shapePts);
-              if (!hasPtInside) {
-                // Check sample points along glyph contour
-                const step = Math.max(1, Math.floor(b.points.length / 8));
-                for (let pi = 0; pi < b.points.length; pi += step) {
-                  if (otPointInPoly(b.points[pi], shapePts)) {
-                    hasPtInside = true;
-                    break;
-                  }
-                }
-              }
-              if (hasPtInside) {
-                matchingGlyphs.push(b);
-              }
-            });
-          }
-
-          const hasDebossHoles = (matchingGlyphs.length > 0);
-          const isUpperDetailInBrand = (!isOwnBase && masterDebossShapes.length > 0 && brandBBox && metric &&
-            (metric.sW * currentScale < 35.0 || metric.sH * currentScale < 15.0) &&
-            metric.sMinX <= brandBBox.bMaxX && metric.sMaxX >= brandBBox.bMinX &&
-            metric.sMinY <= brandBBox.bMaxY && metric.sMaxY >= brandBBox.bMinY);
-
-          if (hasDebossHoles) {
-            // This shape (stand plate or overlapping base plate like house) owns debossed branding glyphs!
-            // Carve debossed branding holes cleanly at Z=0
+            // Target plate / fully containing base plate: owns debossed branding cavity
             const debossedShape = shape.clone();
-            matchingGlyphs.forEach(b => {
+            masterDebossShapes.forEach(b => {
               let outer = b.points;
               if (otPolyArea(outer) > 0) outer = outer.slice().reverse();
               debossedShape.holes.push(new THREE.Path(outer.map(p => new THREE.Vector2(p.x, p.y))));
@@ -2923,35 +2926,77 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
               solidUpperMesh.receiveShadow = true;
               layerGroup.add(solidUpperMesh);
             }
-          } else if (isUpperDetailInBrand) {
-            // Small upper-layer detail path inside deboss cavity:
-            // Extrude only above deboss depth (Z = debossDepth to ownExtrudeDepth) so it doesn't block letters
-            if (remainingBaseDepth > 0.05) {
-              const upperGeom = new THREE.ExtrudeGeometry(shape, {
-                depth: remainingBaseDepth,
+          } else {
+            // ALL OTHER BASE SHAPES (e.g. house body, background fills, side shapes)
+            const overlapsSafetyBox = (brandSafetyBox && metric &&
+              metric.sMinX <= brandSafetyBox.maxX && metric.sMaxX >= brandSafetyBox.minX &&
+              metric.sMinY <= brandSafetyBox.maxY && metric.sMaxY >= brandSafetyBox.minY);
+
+            if (!overlapsSafetyBox) {
+              // Does not touch branding zone: extrude 100% solid from Z = 0 to ownExtrudeDepth (flat on print bed)
+              const geom = new THREE.ExtrudeGeometry(shape, {
+                depth: ownExtrudeDepth,
                 bevelEnabled: false,
                 steps: 1,
                 curveSegments: 6
               });
-              const upperMesh = new THREE.Mesh(upperGeom, mat);
-              upperMesh.position.z = debossDepth;
-              upperMesh.castShadow = true;
-              upperMesh.receiveShadow = true;
-              layerGroup.add(upperMesh);
+              const mesh = new THREE.Mesh(geom, mat);
+              mesh.position.z = 0;
+              mesh.castShadow = true;
+              mesh.receiveShadow = true;
+              layerGroup.add(mesh);
+            } else {
+              // OVERLAPS BRANDING SAFETY BOX (e.g. house reaching down into the stand plate):
+              // 1. Upper solid mesh: extrude full original shape from Z = debossDepth to ownExtrudeDepth
+              if (remainingBaseDepth > 0.05) {
+                const upperGeom = new THREE.ExtrudeGeometry(shape, {
+                  depth: remainingBaseDepth,
+                  bevelEnabled: false,
+                  steps: 1,
+                  curveSegments: 6
+                });
+                const upperMesh = new THREE.Mesh(upperGeom, mat);
+                upperMesh.position.z = debossDepth;
+                upperMesh.castShadow = true;
+                upperMesh.receiveShadow = true;
+                layerGroup.add(upperMesh);
+              }
+
+              // 2. Lower solid mesh (Z = 0 to debossDepth, touching print bed flat at Z=0!):
+              // Clip polygon against brandSafetyBox so ZERO geometry enters the branding cavity
+              const shapePts = shape.getPoints ? shape.getPoints() : [];
+              let clippedPts = shapePts;
+              if (shapePts && shapePts.length >= 3) {
+                if (metric.sMinY < brandSafetyBox.minY) {
+                  // Reaches down from top into branding box: clip so it stays strictly above brandSafetyBox.minY
+                  clippedPts = clipPolygonHalfPlane(shapePts, brandSafetyBox.minY, 'y', true);
+                } else if (metric.sMaxY > brandSafetyBox.maxY && metric.sMinY >= brandSafetyBox.minY) {
+                  // Reaches up from bottom into branding box: clip so it stays strictly below brandSafetyBox.maxY
+                  clippedPts = clipPolygonHalfPlane(shapePts, brandSafetyBox.maxY, 'y', false);
+                } else if (metric.sMinX < brandSafetyBox.minX) {
+                  clippedPts = clipPolygonHalfPlane(shapePts, brandSafetyBox.minX, 'x', true);
+                } else if (metric.sMaxX > brandSafetyBox.maxX) {
+                  clippedPts = clipPolygonHalfPlane(shapePts, brandSafetyBox.maxX, 'x', false);
+                } else {
+                  clippedPts = [];
+                }
+              }
+
+              if (clippedPts && clippedPts.length >= 3) {
+                const lowerShape = new THREE.Shape(clippedPts.map(p => new THREE.Vector2(p.x, p.y)));
+                const lowerGeom = new THREE.ExtrudeGeometry(lowerShape, {
+                  depth: debossDepth,
+                  bevelEnabled: false,
+                  steps: 1,
+                  curveSegments: 6
+                });
+                const lowerMesh = new THREE.Mesh(lowerGeom, mat);
+                lowerMesh.position.z = 0;
+                lowerMesh.castShadow = true;
+                lowerMesh.receiveShadow = true;
+                layerGroup.add(lowerMesh);
+              }
             }
-          } else {
-            // Normal base foundation shape: extrude solid from Z = 0 to ownExtrudeDepth (100% flat on print bed)
-            const geom = new THREE.ExtrudeGeometry(shape, {
-              depth: ownExtrudeDepth,
-              bevelEnabled: false,
-              steps: 1,
-              curveSegments: 6
-            });
-            const mesh = new THREE.Mesh(geom, mat);
-            mesh.position.z = 0;
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            layerGroup.add(mesh);
           }
         });
       } else {
