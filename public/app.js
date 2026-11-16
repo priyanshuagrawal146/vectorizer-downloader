@@ -2677,28 +2677,64 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         let brandBBox = null;
         const currentScale = totalW_mm / (studioState.analysis.width || 1536);
 
-        if (isBase && brandingFont && bottomPlate) {
-          const brandCx = bottomPlate.sCx;
+        // Compute overall base bounding box from base layer own shapes
+        let baseBounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+        baseOwnShapes.forEach(sh => {
+          const pts = sh.getPoints ? sh.getPoints() : [];
+          pts.forEach(p => {
+            if (p.x < baseBounds.minX) baseBounds.minX = p.x;
+            if (p.x > baseBounds.maxX) baseBounds.maxX = p.x;
+            if (p.y < baseBounds.minY) baseBounds.minY = p.y;
+            if (p.y > baseBounds.maxY) baseBounds.maxY = p.y;
+          });
+        });
 
-          // --- Text WIDTH: restore the original formula the user approved ---
-          // 45% of plate width, 8mm margins each side, hard max 48mm
-          const plateMarginSvg = 8 / currentScale;
-          const targetWInSvg = Math.min(
-            bottomPlate.sW * 0.45,
-            bottomPlate.sW - 2 * plateMarginSvg,
-            48 / currentScale
-          );
+        if (isBase && brandingFont && baseOwnShapes.length > 0) {
+          // Horizontally center across base (user requirement: horizontally center across all designs)
+          const brandCx = (bottomPlate && bottomPlate.sW >= (60 / currentScale))
+            ? bottomPlate.sCx
+            : (baseBounds.minX + baseBounds.maxX) / 2;
 
-          // --- Text VERTICAL POSITION: proportional shift that is always bounded within the plate ---
-          // Target: shift text upward by ~27% of plate height + 1.5mm base,
-          // but clamp so bottom line of text always stays ≥1.5mm inside the plate edge.
-          const plateH_mm = bottomPlate.sH * currentScale;
-          // Estimate total text height in mm (VIVAGIFTS + gap + orderID ≈ 1.6× VIVAGIFTS height)
-          const estTextH_mm = Math.min(targetWInSvg * currentScale / 3.0, plateH_mm * 0.80);
-          const idealShiftUp_mm = plateH_mm * 0.27 + 1.5;
-          const maxSafeShiftUp_mm = Math.max(0, (plateH_mm - estTextH_mm) / 2 - 1.5);
-          const shiftUp_mm = Math.min(idealShiftUp_mm, maxSafeShiftUp_mm);
-          const brandCy = bottomPlate.sCy - (shiftUp_mm / currentScale);
+          // Fixed text width: 48mm across ALL designs (user: "yesterday nght we had this in perfect size and place")
+          // Clamped only if the entire base is narrower than 56mm
+          const baseTotalW_mm = (baseBounds.maxX - baseBounds.minX) * currentScale;
+          const targetWidthMm = Math.min(48.0, Math.max(25.0, baseTotalW_mm - 16.0));
+          const targetWInSvg = targetWidthMm / currentScale;
+
+          // Measure exact text block height at target scale
+          const pV0 = brandingFont.getPath('VIVAGIFTS', 0, 0, 100);
+          const bbV0 = pV0.getBoundingBox();
+          const vW0 = bbV0.x2 - bbV0.x1;
+          const rawOrder = (studioState.orderId && typeof studioState.orderId === 'string') ? studioState.orderId.trim() : (studioState.orderId ? String(studioState.orderId) : '12345');
+          const numMatch = rawOrder.match(/\d+/);
+          const orderStr = numMatch ? numMatch[0] : (rawOrder.replace(/^order\s*#?\s*/i, '').trim() || '12345');
+          const pO0 = brandingFont.getPath(orderStr, 0, 0, 75);
+          const bbO0 = pO0.getBoundingBox();
+          const oW0 = bbO0.x2 - bbO0.x1;
+
+          const maxGlyphW0 = Math.max(vW0, oW0);
+          const fontScale = targetWInSvg / maxGlyphW0;
+          const vH = (bbV0.y2 - bbV0.y1) * fontScale;
+          const oH = (bbO0.y2 - bbO0.y1) * fontScale;
+          const gap = vH * 0.35;
+          const totalTextH_svg = vH + gap + oH;
+
+          // Fixed vertical position: 7.5mm up from bottom edge of base plate
+          // User requirement: "slightly up from the bottom around 5-8mm and this should be fixed postition in all designs... horizontally center and 10mm margin from base"
+          // At 7.5mm offset: text bottom is 7.5mm up, center of order ID line is ~10mm from bottom edge
+          const baseBottomY = bottomPlate ? Math.max(bottomPlate.sMaxY, baseBounds.maxY) : baseBounds.maxY;
+          const bottomMarginMm = 7.5;
+          const bottomMarginSvg = bottomMarginMm / currentScale;
+
+          // brandCy is the vertical center of the debossed text block
+          let brandCy = baseBottomY - bottomMarginSvg - (totalTextH_svg / 2);
+
+          // Safety clamp: ensure text top never pokes out the top of the base plate
+          const baseTopY = bottomPlate ? bottomPlate.sMinY : baseBounds.minY;
+          const minSafeCy = baseTopY + (2.0 / currentScale) + (totalTextH_svg / 2);
+          if (brandCy < minSafeCy) {
+            brandCy = minSafeCy;
+          }
 
           masterDebossShapes = generateBrandingShapes(studioState.orderId, brandCx, brandCy, targetWInSvg);
           if (masterDebossShapes.length > 0) {
@@ -2738,8 +2774,7 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           }
 
           // Does this (own-base) shape contain or overlap the branding region?
-          const isTargetPlate = (bottomPlate && metric.shapeIdx === bottomPlate.shapeIdx);
-          const overlapsBrand = isTargetPlate || (masterDebossShapes.length > 0 && brandBBox &&
+          const overlapsBrand = (masterDebossShapes.length > 0 && brandBBox &&
             metric.sMinX <= brandBBox.bMaxX && metric.sMaxX >= brandBBox.bMinX &&
             metric.sMinY <= brandBBox.bMaxY && metric.sMaxY >= brandBBox.bMinY);
 
