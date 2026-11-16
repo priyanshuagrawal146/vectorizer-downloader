@@ -2696,6 +2696,7 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           }
         });
 
+        let targetPlate = null;
         if (isBase && brandingFont && uniqueBaseShapes.length > 0) {
           // Find the wide rectangular pen stand plate at the bottom of the design across ALL shapes
           // Stand plate must touch the bottom edge of the model, have stand height (12-60mm), width >= 50mm, aspect >= 1.4
@@ -2750,6 +2751,23 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           const maxSafeCy = allBaseBounds.maxY - (totalTextH_svg / 2) - (7.0 / currentScale);
           brandCy = Math.max(minSafeCy, Math.min(maxSafeCy, brandCy));
 
+          // Identify targetPlate: if standPlate found use it, otherwise find the largest base shape covering the text center
+          targetPlate = standPlate;
+          if (!targetPlate) {
+            let maxArea = -Infinity;
+            uniqueBaseShapes.forEach(({ metric }) => {
+              if (!metric) return;
+              if (metric.sMinX <= brandCx && metric.sMaxX >= brandCx &&
+                  metric.sMinY <= brandCy && metric.sMaxY >= brandCy) {
+                const area = metric.sW * metric.sH;
+                if (area > maxArea) {
+                  maxArea = area;
+                  targetPlate = metric;
+                }
+              }
+            });
+          }
+
           masterDebossShapes = generateBrandingShapes(studioState.orderId, brandCx, brandCy, targetWInSvg);
           if (masterDebossShapes.length > 0) {
             let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
@@ -2775,112 +2793,111 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
             wireframe: studioState.wireframe3d, side: THREE.DoubleSide });
 
           // Does this shape contain or overlap the branding region?
+          const isTargetPlate = (targetPlate && metric && metric.shapeIdx === targetPlate.shapeIdx);
           const overlapsBrand = (masterDebossShapes.length > 0 && brandBBox &&
             metric.sMinX <= brandBBox.bMaxX && metric.sMaxX >= brandBBox.bMinX &&
             metric.sMinY <= brandBBox.bMaxY && metric.sMaxY >= brandBBox.bMinY);
 
-          if (overlapsBrand) {
-            // Is this a foundation/stand plate or a tiny detail?
-            const isSubstantialPlate = (metric.sW * currentScale >= 30.0 && metric.sH * currentScale >= 10.0);
+          if (isTargetPlate) {
+            // TARGET STAND PLATE: This plate owns the debossed branding!
+            const debossedShape = shape.clone();
+            masterDebossShapes.forEach(b => {
+              let outer = b.points;
+              if (otPolyArea(outer) > 0) outer = outer.slice().reverse();
+              debossedShape.holes.push(new THREE.Path(outer.map(p => new THREE.Vector2(p.x, p.y))));
+            });
 
-            if (isSubstantialPlate) {
-              // Cut holes from this base plate so it creates the clean debossed text cavity at Z=0
-              const debossedShape = shape.clone();
+            // Add inner letter islands (A, R, D, O, 0, 8, 6, etc.) as solid physical pillars
+            if (!islandsAdded) {
+              islandsAdded = true;
               masterDebossShapes.forEach(b => {
-                let outer = b.points;
-                if (otPolyArea(outer) > 0) outer = outer.slice().reverse();
-                debossedShape.holes.push(new THREE.Path(outer.map(p => new THREE.Vector2(p.x, p.y))));
+                b.holes.forEach(island => {
+                  let isl = island;
+                  if (otPolyArea(isl) < 0) isl = isl.slice().reverse();
+                  const islShape = new THREE.Shape(isl.map(p => new THREE.Vector2(p.x, p.y)));
+                  const islGeom = new THREE.ExtrudeGeometry(islShape, {
+                    depth: debossDepth,
+                    bevelEnabled: false,
+                    steps: 1,
+                    curveSegments: 8
+                  });
+                  const islMesh = new THREE.Mesh(islGeom, mat);
+                  islMesh.position.z = 0;
+                  islMesh.castShadow = true;
+                  islMesh.receiveShadow = true;
+                  // DO NOT set isVisualAccent: this mesh MUST be exported to STL/3MF so counter islands (A, 8, 6) physically exist
+                  layerGroup.add(islMesh);
+                });
               });
 
-              // Add inner letter islands (A, R, D, O, 0, 8, 6, etc.) as solid physical pillars
-              if (!islandsAdded) {
-                islandsAdded = true;
-                masterDebossShapes.forEach(b => {
-                  b.holes.forEach(island => {
-                    let isl = island;
-                    if (otPolyArea(isl) < 0) isl = isl.slice().reverse();
-                    const islShape = new THREE.Shape(isl.map(p => new THREE.Vector2(p.x, p.y)));
-                    const islGeom = new THREE.ExtrudeGeometry(islShape, {
-                      depth: debossDepth,
-                      bevelEnabled: false,
-                      steps: 1,
-                      curveSegments: 8
-                    });
-                    const islMesh = new THREE.Mesh(islGeom, mat);
-                    islMesh.position.z = 0;
-                    islMesh.castShadow = true;
-                    islMesh.receiveShadow = true;
-                    // DO NOT set isVisualAccent: this mesh MUST be exported to STL/3MF so counter islands (A, 8, 6) physically exist
-                    layerGroup.add(islMesh);
-                  });
+              // High-contrast dark charcoal deboss cavity ceiling for razor-sharp visual clarity in Web 3D Viewer!
+              masterDebossShapes.forEach(b => {
+                let outer = b.points;
+                if (otPolyArea(outer) < 0) outer = outer.slice().reverse();
+                const cavShape = new THREE.Shape(outer.map(p => new THREE.Vector2(p.x, p.y)));
+                b.holes.forEach(island => {
+                  let isl = island;
+                  if (otPolyArea(isl) > 0) isl = isl.slice().reverse();
+                  cavShape.holes.push(new THREE.Path(isl.map(p => new THREE.Vector2(p.x, p.y))));
                 });
-
-                // High-contrast dark charcoal deboss cavity ceiling for razor-sharp visual clarity in Web 3D Viewer!
-                masterDebossShapes.forEach(b => {
-                  let outer = b.points;
-                  if (otPolyArea(outer) < 0) outer = outer.slice().reverse();
-                  const cavShape = new THREE.Shape(outer.map(p => new THREE.Vector2(p.x, p.y)));
-                  b.holes.forEach(island => {
-                    let isl = island;
-                    if (otPolyArea(isl) > 0) isl = isl.slice().reverse();
-                    cavShape.holes.push(new THREE.Path(isl.map(p => new THREE.Vector2(p.x, p.y))));
-                  });
-                  const cavGeom = new THREE.ShapeGeometry(cavShape);
-                  const cavMat = new THREE.MeshBasicMaterial({
-                    color: 0x181818,
-                    side: THREE.DoubleSide,
-                    depthWrite: false,
-                    polygonOffset: true,
-                    polygonOffsetFactor: -2,
-                    polygonOffsetUnits: -2
-                  });
-                  const cavMesh = new THREE.Mesh(cavGeom, cavMat);
-                  cavMesh.position.z = debossDepth - 0.005; // Placed at ceiling of deboss cavity facing down
-                  cavMesh.renderOrder = 2;
-                  cavMesh.userData.isVisualAccent = true; // Mark as visual accent to exclude from physical manufacturing mesh
-                  layerGroup.add(cavMesh);
+                const cavGeom = new THREE.ShapeGeometry(cavShape);
+                const cavMat = new THREE.MeshBasicMaterial({
+                  color: 0x181818,
+                  side: THREE.DoubleSide,
+                  depthWrite: false,
+                  polygonOffset: true,
+                  polygonOffsetFactor: -2,
+                  polygonOffsetUnits: -2
                 });
-              }
+                const cavMesh = new THREE.Mesh(cavGeom, cavMat);
+                cavMesh.position.z = debossDepth - 0.005; // Placed at ceiling of deboss cavity facing down
+                cavMesh.renderOrder = 2;
+                cavMesh.userData.isVisualAccent = true; // Mark as visual accent to exclude from physical manufacturing mesh
+                layerGroup.add(cavMesh);
+              });
+            }
 
-              const debossGeom = new THREE.ExtrudeGeometry(debossedShape, {
-                depth: debossDepth,
+            const debossGeom = new THREE.ExtrudeGeometry(debossedShape, {
+              depth: debossDepth,
+              bevelEnabled: false,
+              steps: 1,
+              curveSegments: 6
+            });
+            const debossMesh = new THREE.Mesh(debossGeom, mat);
+            debossMesh.position.z = 0;
+            debossMesh.castShadow = true;
+            debossMesh.receiveShadow = true;
+            layerGroup.add(debossMesh);
+
+            if (remainingBaseDepth > 0.05) {
+              const solidUpperGeom = new THREE.ExtrudeGeometry(shape, {
+                depth: remainingBaseDepth,
                 bevelEnabled: false,
                 steps: 1,
                 curveSegments: 6
               });
-              const debossMesh = new THREE.Mesh(debossGeom, mat);
-              debossMesh.position.z = 0;
-              debossMesh.castShadow = true;
-              debossMesh.receiveShadow = true;
-              layerGroup.add(debossMesh);
-
-              if (remainingBaseDepth > 0.05) {
-                const solidUpperGeom = new THREE.ExtrudeGeometry(shape, {
-                  depth: remainingBaseDepth,
-                  bevelEnabled: false,
-                  steps: 1,
-                  curveSegments: 6
-                });
-                const solidUpperMesh = new THREE.Mesh(solidUpperGeom, mat);
-                solidUpperMesh.position.z = debossDepth;
-                solidUpperMesh.castShadow = true;
-                solidUpperMesh.receiveShadow = true;
-                layerGroup.add(solidUpperMesh);
-              }
-            } else {
-              // Tiny detail path that overlaps branding: only extrude ABOVE deboss depth (Z = 0.40mm to depth)
-              // so it NEVER fills in or blocks the debossed lettering at Z = 0!
-              if (remainingBaseDepth > 0.05) {
-                const upperGeom = new THREE.ExtrudeGeometry(shape, {
-                  depth: remainingBaseDepth,
-                  bevelEnabled: false,
-                  steps: 1,
-                  curveSegments: 6
-                });
-                const upperMesh = new THREE.Mesh(upperGeom, mat);
-                upperMesh.position.z = debossDepth;
-                layerGroup.add(upperMesh);
-              }
+              const solidUpperMesh = new THREE.Mesh(solidUpperGeom, mat);
+              solidUpperMesh.position.z = debossDepth;
+              solidUpperMesh.castShadow = true;
+              solidUpperMesh.receiveShadow = true;
+              layerGroup.add(solidUpperMesh);
+            }
+          } else if (overlapsBrand) {
+            // ANY OTHER SHAPE that overlaps branding:
+            // Extrude ONLY above deboss cavity (Z = debossDepth to ownExtrudeDepth).
+            // It has ZERO presence at Z = 0..debossDepth, so it can NEVER fill in or block any letter!
+            if (remainingBaseDepth > 0.05) {
+              const upperGeom = new THREE.ExtrudeGeometry(shape, {
+                depth: remainingBaseDepth,
+                bevelEnabled: false,
+                steps: 1,
+                curveSegments: 6
+              });
+              const upperMesh = new THREE.Mesh(upperGeom, mat);
+              upperMesh.position.z = debossDepth;
+              upperMesh.castShadow = true;
+              upperMesh.receiveShadow = true;
+              layerGroup.add(upperMesh);
             }
           } else {
             // Normal shape not overlapping branding: extrude solid from Z = 0 to ownExtrudeDepth
@@ -2892,7 +2909,8 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
             });
             const mesh = new THREE.Mesh(geom, mat);
             mesh.position.z = 0;
-            mesh.castShadow = true; mesh.receiveShadow = true;
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
             layerGroup.add(mesh);
           }
         });
