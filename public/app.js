@@ -115,20 +115,30 @@ document.addEventListener('DOMContentLoaded', () => {
     return out;
   }
 
-  function generateBrandingShapes(orderId, cx, cy, targetTotalW) {
-    if (!brandingFont) return [];
-    // User requested: in order ID just write number, no "Order #"
+  function getDebossOrderLine(orderId, alphabet, arrow) {
     const rawOrder = (orderId && typeof orderId === 'string') ? orderId.trim() : (orderId ? String(orderId) : '12345');
-    // Extract only digits, or strip any "Order #" prefix
     const numMatch = rawOrder.match(/\d+/);
-    const orderStr = numMatch ? numMatch[0] : (rawOrder.replace(/^order\s*#?\s*/i, '').trim() || '12345');
+    const baseOrder = numMatch ? numMatch[0] : (rawOrder.replace(/^order\s*#?\s*/i, '').trim() || '12345');
+
+    const alpha = (alphabet !== undefined && alphabet !== null ? String(alphabet) : (studioState.orderAlphabet || '')).trim().toUpperCase();
+    const arr = (arrow !== undefined && arrow !== null ? String(arrow) : (studioState.orderArrow || '')).trim();
+
+    let line = baseOrder;
+    if (alpha) line += ' ' + alpha;
+    if (arr === '<' || arr === '>') line += ' ' + arr;
+    return line;
+  }
+
+  function generateBrandingShapes(orderId, cx, cy, targetTotalW, optAlphabet, optArrow) {
+    if (!brandingFont) return [];
+    const orderLine = getDebossOrderLine(orderId, optAlphabet, optArrow);
 
     // Baseline sizes
     const pV0 = brandingFont.getPath('VIVAGIFTS', 0, 0, 100);
     const bbV0 = pV0.getBoundingBox();
     const vW0 = bbV0.x2 - bbV0.x1;
 
-    const pO0 = brandingFont.getPath(orderStr, 0, 0, 75);
+    const pO0 = brandingFont.getPath(orderLine, 0, 0, 75);
     const bbO0 = pO0.getBoundingBox();
     const oW0 = bbO0.x2 - bbO0.x1;
 
@@ -141,7 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const bbV = pV.getBoundingBox();
     const vH = bbV.y2 - bbV.y1;
 
-    const pO = brandingFont.getPath(orderStr, 0, 0, oSize);
+    const pO = brandingFont.getPath(orderLine, 0, 0, oSize);
     const bbO = pO.getBoundingBox();
     const oH = bbO.y2 - bbO.y1;
 
@@ -152,7 +162,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const botY = topY + gap + oH;
 
     const pTop = brandingFont.getPath('VIVAGIFTS', cx - (bbV.x1 + bbV.x2) / 2, topY, vSize);
-    const pBot = brandingFont.getPath(orderStr, cx - (bbO.x1 + bbO.x2) / 2, botY, oSize);
+    const pBot = brandingFont.getPath(orderLine, cx - (bbO.x1 + bbO.x2) / 2, botY, oSize);
 
     // CRITICAL: Mirror X coordinate along cx so text reads left-to-right when looking from the underside (bed base)
     [pTop, pBot].forEach(path => {
@@ -700,6 +710,8 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         analysis: studioState.analysis,
         raisedTextDetected: studioState.raisedTextDetected,
         orderId: studioState.orderId || '',
+        orderAlphabet: studioState.orderAlphabet || '',
+        orderArrow: studioState.orderArrow || '',
         updatedAt: Date.now()
       };
 
@@ -906,12 +918,17 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
   const dismissGuideModal = document.getElementById('dismissGuideModal');
   const copyGuideTextBtn = document.getElementById('copyGuideTextBtn');
 
-  // Order ID Modal Elements
+  // Order ID Modal & Pen Stand Debossing Elements
   const orderIdModal = document.getElementById('orderIdModal');
   const exportOrderIdInput = document.getElementById('exportOrderIdInput');
+  const exportAlphabetInput = document.getElementById('exportAlphabetInput');
   const closeOrderIdModal = document.getElementById('closeOrderIdModal');
   const cancelOrderIdModal = document.getElementById('cancelOrderIdModal');
   const confirmOrderIdExportBtn = document.getElementById('confirmOrderIdExportBtn');
+  const modalDebossLine2Preview = document.getElementById('modalDebossLine2Preview');
+  const sidebarOrderIdInput = document.getElementById('sidebarOrderIdInput');
+  const sidebarAlphabetInput = document.getElementById('sidebarAlphabetInput');
+  const sidebarDebossPreviewBadge = document.getElementById('sidebarDebossPreviewBadge');
   const viewBottom = document.getElementById('viewBottom');
 
   // Multi-merge & combine toolbar elements
@@ -951,7 +968,9 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
     cameraInitialized: false,
     modelCentered: false,
     historyId: null,
-    orderId: ''
+    orderId: '',
+    orderAlphabet: '',
+    orderArrow: ''
   };
 
   // ==================== UNDO / REDO SYSTEM ====================
@@ -1090,6 +1109,10 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
     const fileNameMatch = name.match(/\d{4,}/);
     if (fileNameMatch) {
       studioState.orderId = fileNameMatch[0];
+      const alphaSuffixMatch = name.match(new RegExp(fileNameMatch[0] + '[-_]?([A-Za-z])(?![A-Za-z0-9])'));
+      if (alphaSuffixMatch) {
+        studioState.orderAlphabet = alphaSuffixMatch[1].toUpperCase();
+      }
     }
 
     // Await branding font so debossed branding is guaranteed loaded before initial render
@@ -1114,6 +1137,9 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           const numMatch = name.match(/\d{4,}/);
           if (numMatch) studioState.orderId = numMatch[0];
         }
+        if (savedStudioData.orderAlphabet !== undefined) studioState.orderAlphabet = savedStudioData.orderAlphabet;
+        if (savedStudioData.orderArrow !== undefined) studioState.orderArrow = savedStudioData.orderArrow;
+        syncDebossUI();
         
         // Deep copy restored layers
         studioState.layers = JSON.parse(JSON.stringify(savedStudioData.layers));
@@ -2800,10 +2826,8 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           const pV0 = brandingFont.getPath('VIVAGIFTS', 0, 0, 100);
           const bbV0 = pV0.getBoundingBox();
           const vW0 = bbV0.x2 - bbV0.x1;
-          const rawOrder = (studioState.orderId && typeof studioState.orderId === 'string') ? studioState.orderId.trim() : (studioState.orderId ? String(studioState.orderId) : '12345');
-          const numMatch = rawOrder.match(/\d+/);
-          const orderStr = numMatch ? numMatch[0] : (rawOrder.replace(/^order\s*#?\s*/i, '').trim() || '12345');
-          const pO0 = brandingFont.getPath(orderStr, 0, 0, 75);
+          const orderLine = getDebossOrderLine(studioState.orderId, studioState.orderAlphabet, studioState.orderArrow);
+          const pO0 = brandingFont.getPath(orderLine, 0, 0, 75);
           const bbO0 = pO0.getBoundingBox();
           const oW0 = bbO0.x2 - bbO0.x1;
 
@@ -2846,7 +2870,7 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
             targetPlate = bottomPlate;
           }
 
-          masterDebossShapes = generateBrandingShapes(studioState.orderId, brandCx, brandCy, targetWInSvg);
+          masterDebossShapes = generateBrandingShapes(studioState.orderId, brandCx, brandCy, targetWInSvg, studioState.orderAlphabet, studioState.orderArrow);
           if (masterDebossShapes.length > 0) {
             let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
             masterDebossShapes.forEach(b => b.points.forEach(p => {
@@ -3247,16 +3271,117 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
     else threeLoadingOverlay.classList.add('hidden');
   }
 
-  // ==================== MANUFACTURING EXPORT LOGIC ====================
+  // ==================== MANUFACTURING EXPORT & PEN STAND DEBOSSING ====================
   let pendingExportFormat = null;
+
+  function syncDebossUI() {
+    const order = studioState.orderId || '';
+    const alpha = (studioState.orderAlphabet || '').toUpperCase();
+    const arr = studioState.orderArrow || '';
+
+    if (exportOrderIdInput) exportOrderIdInput.value = order;
+    if (exportAlphabetInput) exportAlphabetInput.value = alpha;
+    if (sidebarOrderIdInput) sidebarOrderIdInput.value = order;
+    if (sidebarAlphabetInput) sidebarAlphabetInput.value = alpha;
+
+    // Sync modal arrow buttons
+    document.querySelectorAll('#orderIdModal .btn-arrow-select').forEach(btn => {
+      btn.classList.toggle('active', (btn.dataset.arrow || '') === arr);
+    });
+    // Sync sidebar arrow buttons
+    document.querySelectorAll('.btn-sidebar-arrow').forEach(btn => {
+      btn.classList.toggle('active', (btn.dataset.arrow || '') === arr);
+    });
+
+    const previewLine = getDebossOrderLine(order, alpha, arr);
+    if (modalDebossLine2Preview) {
+      modalDebossLine2Preview.textContent = previewLine;
+    }
+    if (sidebarDebossPreviewBadge) {
+      sidebarDebossPreviewBadge.textContent = previewLine;
+    }
+  }
+
+  function setDebossArrow(arrow) {
+    if (studioState.orderArrow === arrow) {
+      studioState.orderArrow = '';
+    } else {
+      studioState.orderArrow = arrow || '';
+    }
+    syncDebossUI();
+    saveStudioStateToHistory();
+    updateThreeGeometry(false, false);
+  }
+
+  // Arrow option buttons in modal
+  document.querySelectorAll('#orderIdModal .btn-arrow-select').forEach(btn => {
+    btn.addEventListener('click', () => setDebossArrow(btn.dataset.arrow));
+  });
+
+  // Arrow option buttons in sidebar
+  document.querySelectorAll('.btn-sidebar-arrow').forEach(btn => {
+    btn.addEventListener('click', () => setDebossArrow(btn.dataset.arrow));
+  });
+
+  // Modal input handlers
+  if (exportOrderIdInput) {
+    exportOrderIdInput.addEventListener('input', (e) => {
+      studioState.orderId = e.target.value;
+      syncDebossUI();
+      saveStudioStateToHistory();
+      updateThreeGeometry(false, false);
+    });
+    exportOrderIdInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        confirmOrderIdExportBtn?.click();
+      } else if (e.key === 'Escape') {
+        if (orderIdModal) orderIdModal.classList.add('hidden');
+        pendingExportFormat = null;
+      }
+    });
+  }
+  if (exportAlphabetInput) {
+    exportAlphabetInput.addEventListener('input', (e) => {
+      studioState.orderAlphabet = e.target.value.toUpperCase();
+      syncDebossUI();
+      saveStudioStateToHistory();
+      updateThreeGeometry(false, false);
+    });
+    exportAlphabetInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        confirmOrderIdExportBtn?.click();
+      } else if (e.key === 'Escape') {
+        if (orderIdModal) orderIdModal.classList.add('hidden');
+        pendingExportFormat = null;
+      }
+    });
+  }
+
+  // Sidebar input handlers
+  if (sidebarOrderIdInput) {
+    sidebarOrderIdInput.addEventListener('input', (e) => {
+      studioState.orderId = e.target.value;
+      syncDebossUI();
+      saveStudioStateToHistory();
+      updateThreeGeometry(false, false);
+    });
+  }
+  if (sidebarAlphabetInput) {
+    sidebarAlphabetInput.addEventListener('input', (e) => {
+      studioState.orderAlphabet = e.target.value.toUpperCase();
+      syncDebossUI();
+      saveStudioStateToHistory();
+      updateThreeGeometry(false, false);
+    });
+  }
 
   function promptOrderIdForExport(format) {
     if (!studioState.svg || studioState.layers.length === 0) return;
     pendingExportFormat = format;
     if (orderIdModal) {
-      if (exportOrderIdInput) {
-        exportOrderIdInput.value = studioState.orderId || '';
-      }
+      syncDebossUI();
       orderIdModal.classList.remove('hidden');
       setTimeout(() => {
         if (exportOrderIdInput) {
@@ -3296,6 +3421,11 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         return;
       }
       studioState.orderId = orderVal;
+      if (exportAlphabetInput) {
+        studioState.orderAlphabet = exportAlphabetInput.value.trim().toUpperCase();
+      }
+      syncDebossUI();
+      saveStudioStateToHistory();
       if (orderIdModal) orderIdModal.classList.add('hidden');
 
       // Update 3D viewport geometry so debossed branding is immediately generated on the base layer
@@ -3305,18 +3435,6 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
       const fmt = pendingExportFormat || '3mf';
       pendingExportFormat = null;
       triggerExport(fmt);
-    });
-  }
-
-  if (exportOrderIdInput) {
-    exportOrderIdInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        confirmOrderIdExportBtn?.click();
-      } else if (e.key === 'Escape') {
-        if (orderIdModal) orderIdModal.classList.add('hidden');
-        pendingExportFormat = null;
-      }
     });
   }
 
@@ -3696,7 +3814,10 @@ ${meshObjectsXml}${assemblyObjectXml}  </resources>
       const rawJob = (studioState.orderId && studioState.orderId.trim()) 
         ? studioState.orderId.trim() 
         : (studioState.jobName || 'Nameplate');
-      const jobName = rawJob.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const alphaSuffix = (studioState.orderAlphabet && studioState.orderAlphabet.trim())
+        ? '_' + studioState.orderAlphabet.trim().toUpperCase()
+        : '';
+      const jobName = (rawJob + alphaSuffix).replace(/[^a-zA-Z0-9_-]/g, '_');
       const fixedWidthMm = studioState.fixedWidthMm || 150.0;
       const totalThicknessMm = studioState.totalThicknessMm || 10.0;
       const baseLayer = studioState.layers.find(l => l.role === 'base') || studioState.layers[0];
