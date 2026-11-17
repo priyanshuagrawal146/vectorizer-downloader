@@ -1086,6 +1086,12 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
     studioState.historyId = historyId || null;
     viewportModelName.textContent = name;
 
+    // Immediately extract Order ID from file/job name (e.g. "59444.svg" or "ORD-59444" -> "59444")
+    const fileNameMatch = name.match(/\d{4,}/);
+    if (fileNameMatch) {
+      studioState.orderId = fileNameMatch[0];
+    }
+
     // Await branding font so debossed branding is guaranteed loaded before initial render
     await ensureBrandingFont();
 
@@ -1187,6 +1193,7 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
 
       updateDimensionBadges();
       renderLayersList();
+      await ensureBrandingFont();
       initOrUpdateThreeScene();
       // Save initial 3D model state to history
       saveStudioStateToHistory();
@@ -2621,9 +2628,9 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           if (!mi) return;
 
           let isContainedInsideOther = false;
-          // Never drop bottomPlate (the stand plate) or a wide structural plate
+          // Never drop bottomPlate (the stand plate) or a genuine structural plate (>= 30mm wide and >= 10mm high)
           const isStructuralPlate = (bottomPlate && mi.shapeIdx === bottomPlate.shapeIdx) ||
-            (mi.sW * currentScale >= 30.0 || mi.aspect >= 1.4);
+            (mi.sW * currentScale >= 30.0 && mi.sH * currentScale >= 10.0);
           if (!isStructuralPlate) {
             for (let j = 0; j < baseShapeMetrics.length; j++) {
               if (sIdx === j) continue;
@@ -2652,65 +2659,6 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
             });
           }
         });
-
-        // 2. In solidBase mode, add ONLY large structural silhouette plates from upper non-text layers
-        //    that extend OUTSIDE existing base shapes into open air.
-        //    NEVER add Raised Text or shapes already covered by the base foundation!
-        if (studioState.solidBase) {
-          studioState.layers.forEach((l, lIdx) => {
-            if (lIdx === 0) return;
-            // Never inject Raised Text into the base foundation
-            if (l.role === 'top' || l.role === 'raised' || (l.name && l.name.toLowerCase().includes('text'))) return;
-
-            const extraHtml = (l.paths || []).map(d => `<path fill="${layer.color}" d="${d}" />`).join('');
-            if (!extraHtml) return;
-            const extraSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}"><g fill="${layer.color}">${extraHtml}</g></svg>`;
-            const extraSvgData = loader.parse(extraSvgStr);
-            extraSvgData.paths.forEach(svgPath => {
-              THREE.SVGLoader.createShapes(svgPath).forEach(sh => {
-                const pts = sh.getPoints ? sh.getPoints() : [];
-                if (pts.length < 3) return;
-                let sMinX = Infinity, sMaxX = -Infinity, sMinY = Infinity, sMaxY = -Infinity;
-                pts.forEach(p => {
-                  if (p.x < sMinX) sMinX = p.x;
-                  if (p.x > sMaxX) sMaxX = p.x;
-                  if (p.y < sMinY) sMinY = p.y;
-                  if (p.y > sMaxY) sMaxY = p.y;
-                });
-                const sW = sMaxX - sMinX; const sH = sMaxY - sMinY;
-                const sW_mm = sW * currentScale;
-                const sH_mm = sH * currentScale;
-                // Only large structural plates can form new foundation extensions:
-                if (sW_mm < 20.0 && sH_mm < 20.0) return;
-
-                // Check if this shape is already covered inside any existing base shape:
-                let isInsideExistingBase = false;
-                for (const { metric: baseMetric } of uniqueBaseShapes) {
-                  if (!baseMetric) continue;
-                  if (sMinX >= baseMetric.sMinX - 2 && sMaxX <= baseMetric.sMaxX + 2 &&
-                    sMinY >= baseMetric.sMinY - 2 && sMaxY <= baseMetric.sMaxY + 2) {
-                    const basePts = baseMetric.shape.getPoints ? baseMetric.shape.getPoints() : [];
-                    if (basePts.length >= 3 && otPointInPoly({ x: (sMinX + sMaxX) / 2, y: (sMinY + sMaxY) / 2 }, basePts)) {
-                      isInsideExistingBase = true;
-                      break;
-                    }
-                  }
-                }
-                if (isInsideExistingBase) return;
-
-                if (studioState.solidBase) {
-                  sh.holes = [];
-                }
-
-                uniqueBaseShapes.push({
-                  shape: sh,
-                  metric: { shapeIdx: uniqueBaseShapes.length, shape: sh, sMinX, sMaxX, sMinY, sMaxY, sW, sH, sCx: (sMinX + sMaxX) / 2, sCy: (sMinY + sMaxY) / 2, aspect: sW / Math.max(1, sH) },
-                  isOwnBase: false
-                });
-              });
-            });
-          });
-        }
 
         // Generate master debossed branding shapes ONCE
         masterDebossShapes = [];
@@ -2843,7 +2791,7 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
             wireframe: studioState.wireframe3d, side: THREE.DoubleSide });
 
           // 1. Is this the primary target plate designated for debossed branding?
-          const isTargetPlate = (targetPlate && metric && metric.shapeIdx === targetPlate.shapeIdx);
+          const isTargetPlate = (targetPlate && metric && (metric === targetPlate || metric.shapeIdx === targetPlate.shapeIdx));
 
           // 2. Or does this shape fully enclose the entire branding bounding box?
           const fullyContainsBrand = (masterDebossShapes.length > 0 && brandBBox && metric &&
