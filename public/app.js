@@ -2628,9 +2628,9 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           if (!mi) return;
 
           let isContainedInsideOther = false;
-          // Never drop bottomPlate (the stand plate) or a genuine structural plate (>= 30mm wide and >= 10mm high)
+          // Never drop bottomPlate (the stand plate) or a genuine structural plate (>= 18mm or area >= 200 mm²)
           const isStructuralPlate = (bottomPlate && mi.shapeIdx === bottomPlate.shapeIdx) ||
-            (mi.sW * currentScale >= 30.0 && mi.sH * currentScale >= 10.0);
+            (mi.sW * currentScale >= 18.0 || mi.sH * currentScale >= 18.0 || (mi.sW * mi.sH * currentScale * currentScale >= 200.0));
           if (!isStructuralPlate) {
             for (let j = 0; j < baseShapeMetrics.length; j++) {
               if (sIdx === j) continue;
@@ -2660,16 +2660,15 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           }
         });
 
-        // 2. When solidBase is active: add structural foundation plates from upper artwork layers
-        // so models where upper layers bridge separate parts (e.g. green badge in 598751) have a continuous,
-        // joined solid foundation plate without any layers hanging in mid-air.
-        // Inner details (letters, icons, text, punctuation) are strictly filtered out to prevent slicer dots!
+        // 2. When solidBase is active: add structural foundation plates from upper layers
+        // so models where upper layers contain outer borders, silhouettes or plates
+        // (e.g. white circular border in 59878PURPLE, green badge in 598751) have a continuous,
+        // 100% full solid foundation plate without any layers hanging in mid-air.
+        // Inner text details (letters, numbers, punctuation dots) are strictly filtered out to prevent slicer dots!
         if (studioState.solidBase) {
           studioState.layers.forEach((l, lIdx) => {
-            if (lIdx === 0) return; // skip base layer (already handled above)
-            if (l.role === 'top' || l.role === 'text' || l.role === 'cutout' || l.isRaisedText) return;
-            const lName = (l.name || '').toLowerCase();
-            if (lName.includes('raised text') || lName.includes('text')) return;
+            if (lIdx === 0) return; // skip base layer (already handled in step 1)
+            if (l.role === 'cutout') return; // skip cutout layers
 
             const extraPaths = (l.paths || []).map(d => `<path fill="${layer.color}" d="${d}" />`).join('');
             if (!extraPaths) return;
@@ -2679,7 +2678,7 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
             extraSvgData.paths.forEach(svgPath => {
               THREE.SVGLoader.createShapes(svgPath).forEach(sh => {
                 if (studioState.solidBase) {
-                  sh.holes = []; // 100% solid foundation plate
+                  sh.holes = []; // 100% solid foundation plate (removes inner hollows/puzzle cutouts)
                 }
                 const pts = sh.getPoints ? sh.getPoints() : [];
                 if (pts.length < 3) return;
@@ -2695,31 +2694,43 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
                 const sH = sMaxY - sMinY;
                 const sCx = (sMinX + sMaxX) / 2;
                 const sCy = (sMinY + sMaxY) / 2;
+                const sW_mm = sW * currentScale;
+                const sH_mm = sH * currentScale;
+                const area_mm2 = sW_mm * sH_mm;
 
-                // A. Skip tiny details, punctuation or small text (smaller than 6mm in real-world size)
-                if ((sW * currentScale < 6.0 && sH * currentScale < 6.0) || sW * currentScale < 2.0 || sH * currentScale < 2.0) {
+                // A. Skip tiny specks or noise (< 2.5mm)
+                if (sW_mm < 2.5 || sH_mm < 2.5) {
                   return;
                 }
 
-                // B. Skip if geometrically contained inside ANY existing base shape.
-                // This guarantees inner details (letters, icons, accents) inside a plate NEVER duplicate into base infill
-                let isContainedInsideExisting = false;
-                for (let k = 0; k < uniqueBaseShapes.length; k++) {
-                  const exMetric = uniqueBaseShapes[k].metric;
-                  if (!exMetric) continue;
-                  if (exMetric.sW > sW && exMetric.sH > sH &&
-                      sMinX >= exMetric.sMinX - 2 && sMaxX <= exMetric.sMaxX + 2 &&
-                      sMinY >= exMetric.sMinY - 2 && sMaxY <= exMetric.sMaxY + 2) {
-                    const exPts = uniqueBaseShapes[k].shape.getPoints ? uniqueBaseShapes[k].shape.getPoints() : [];
-                    if (exPts.length >= 3 && otPointInPoly({ x: sCx, y: sCy }, exPts)) {
-                      isContainedInsideExisting = true;
-                      break;
+                // B. Identify if this is a major structural plate / border
+                // Any shape with dimension >= 18mm or bbox area >= 200 mm² is a structural plate
+                // (e.g. circular border in 59878, green badge in 598751) and must NEVER be dropped!
+                const isStructuralPlate = (sW_mm >= 18.0 || sH_mm >= 18.0 || area_mm2 >= 200.0);
+
+                if (!isStructuralPlate) {
+                  // For smaller shapes (letters, punctuation, small accents < 18mm):
+                  // Check if it is geometrically contained inside ANY existing base shape.
+                  // If it is inside an existing solid base plate, it is an inner detail
+                  // and must NOT be duplicated into the base layer at Z=0 (eliminates slicer dots!).
+                  let isContainedInsideExisting = false;
+                  for (let k = 0; k < uniqueBaseShapes.length; k++) {
+                    const exMetric = uniqueBaseShapes[k].metric;
+                    if (!exMetric) continue;
+                    if (exMetric.sW > sW && exMetric.sH > sH &&
+                        sMinX >= exMetric.sMinX - 1 && sMaxX <= exMetric.sMaxX + 1 &&
+                        sMinY >= exMetric.sMinY - 1 && sMaxY <= exMetric.sMaxY + 1) {
+                      const exPts = uniqueBaseShapes[k].shape.getPoints ? uniqueBaseShapes[k].shape.getPoints() : [];
+                      if (exPts.length >= 3 && otPointInPoly({ x: sCx, y: sCy }, exPts)) {
+                        isContainedInsideExisting = true;
+                        break;
+                      }
                     }
                   }
+                  if (isContainedInsideExisting) return;
                 }
-                if (isContainedInsideExisting) return;
 
-                // C. Genuine structural plate that expands base foundation silhouette (e.g. green badge in 598751)
+                // C. Genuine structural plate that expands base foundation silhouette (e.g. white border in 59878, green badge in 598751)
                 uniqueBaseShapes.push({
                   shape: sh,
                   metric: {
