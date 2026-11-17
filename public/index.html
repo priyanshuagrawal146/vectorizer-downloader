@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,7 +9,9 @@
   <title>Vectorizer.AI SVG Extractor & Downloader</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet">
   <link rel="stylesheet" href="style.css?v=2.7.0">
   <!-- Three.js and 3D Studio Libs -->
   <script src="libs/three.min.js"></script>
@@ -17,6 +20,7 @@
   <script src="libs/jszip.min.js"></script>
   <script src="libs/opentype.min.js"></script>
 </head>
+
 <body>
   <div class="glow-bg"></div>
   <div class="glow-bg-secondary"></div>
@@ -26,7 +30,8 @@
     <header class="app-header">
       <div class="brand">
         <div class="logo-badge">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
             <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
             <polyline points="2 17 12 22 22 17"></polyline>
             <polyline points="2 12 12 17 22 12"></polyline>
@@ -52,7 +57,9 @@
           </button>
           <button id="tabBtn3DStudio" class="tab-btn">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+              <path
+                d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
+              </path>
               <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
               <line x1="12" y1="22.08" x2="12" y2="12"></line>
             </svg>
@@ -66,590 +73,607 @@
     <div id="vectorizerView">
       <!-- Main Input Card -->
       <section class="card input-card">
-      <div class="card-body">
-        <label for="urlInput" class="input-label">
-          <span>Vectorizer.AI Image URL or Token</span>
-          <button id="sampleBtn" class="btn-link" type="button">Use Sample URL</button>
-        </label>
-        
-        <form id="extractForm" class="input-form">
-          <div class="input-wrapper">
-            <div class="input-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
-                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
-              </svg>
-            </div>
-            <input 
-              type="text" 
-              id="urlInput" 
-              name="urlInput" 
-              placeholder="https://vectorizer.ai/images/1788848214397-9ab9555d7ad0bc29-.../edit" 
-              autocomplete="off" 
-              spellcheck="false"
-              required
-            />
-            <button id="pasteBtn" class="btn-icon" type="button" title="Paste from clipboard">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
-                <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
-              </svg>
-            </button>
-          </div>
+        <div class="card-body">
+          <label for="urlInput" class="input-label">
+            <span>Vectorizer.AI Image URL or Token</span>
+            <button id="sampleBtn" class="btn-link" type="button">Use Sample URL</button>
+          </label>
 
-          <div class="form-options-row">
-            <div class="option-group">
-              <span class="option-title">SVG Layer Structure:</span>
-              <div class="segmented-control">
-                <label class="seg-btn">
-                  <input type="radio" name="groupByOption" value="none" checked>
-                  <span>Standard Layering</span>
-                </label>
-                <label class="seg-btn">
-                  <input type="radio" name="groupByOption" value="color">
-                  <span>🎨 Group by Color (&lt;g&gt;)</span>
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <button id="submitBtn" type="submit" class="btn btn-primary">
-            <span class="btn-text">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-              Extract Vector SVG
-            </span>
-            <span class="btn-loader">
-              <span class="spinner"></span> Extracting...
-            </span>
-          </button>
-        </form>
-
-        <!-- Progress Container -->
-        <div id="progressContainer" class="progress-section hidden">
-          <div class="progress-header">
-            <span id="progressStatus" class="progress-status">Connecting to stream...</span>
-            <span id="progressPercent" class="progress-percent">0%</span>
-          </div>
-          <div class="progress-bar-track">
-            <div id="progressBar" class="progress-bar-fill" style="width: 0%;"></div>
-          </div>
-          <div class="progress-steps">
-            <div class="step" id="step-meta"><span class="step-icon"></span> Metadata</div>
-            <div class="step" id="step-ws"><span class="step-icon"></span> WebSocket</div>
-            <div class="step" id="step-chunks"><span class="step-icon"></span> Vector Chunks</div>
-            <div class="step" id="step-compile"><span class="step-icon"></span> SVG Geometry</div>
-          </div>
-        </div>
-
-        <!-- Error Container -->
-        <div id="errorContainer" class="error-banner hidden">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="8" x2="12" y2="12"></line>
-            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-          </svg>
-          <div class="error-text" id="errorMessage">Extraction failed</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Result & Preview Section -->
-    <section id="resultSection" class="result-section hidden">
-      <div class="result-grid">
-        <!-- Preview Column -->
-        <div class="card preview-card">
-          <div class="preview-header">
-            <div class="preview-title">
-              <span class="indicator-dot"></span>
-              <span id="resultFilename">vector_result.svg</span>
-            </div>
-            
-            <div class="preview-controls">
-              <!-- Background switcher -->
-              <div class="bg-switcher" title="Change canvas background">
-                <button class="bg-opt active" data-bg="grid-dark" title="Dark Grid"></button>
-                <button class="bg-opt" data-bg="grid-light" title="Light Grid"></button>
-                <button class="bg-opt" data-bg="checker" title="Checkerboard"></button>
-                <button class="bg-opt" data-bg="black" title="Pure Black"></button>
-                <button class="bg-opt" data-bg="white" title="Pure White"></button>
-              </div>
-
-              <div class="divider-v"></div>
-
-              <!-- View toggles -->
-              <button id="toggleWireframe" class="btn-tool" title="Toggle Outlines / Wireframe">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-                  <polygon points="2 17 12 22 22 17 12 12 2 17"></polygon>
+          <form id="extractForm" class="input-form">
+            <div class="input-wrapper">
+              <div class="input-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
                 </svg>
-                <span>Wireframe</span>
-              </button>
-
-              <button id="resetZoomBtn" class="btn-tool" title="Reset Zoom">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="11" cy="11" r="8"></circle>
-                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                  <line x1="11" y1="8" x2="11" y2="14"></line>
-                  <line x1="8" y1="11" x2="14" y2="11"></line>
+              </div>
+              <input type="text" id="urlInput" name="urlInput"
+                placeholder="https://vectorizer.ai/images/1788848214397-9ab9555d7ad0bc29-.../edit" autocomplete="off"
+                spellcheck="false" required />
+              <button id="pasteBtn" class="btn-icon" type="button" title="Paste from clipboard">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                  <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
                 </svg>
-                <span>100%</span>
               </button>
             </div>
-          </div>
 
-          <div id="viewportContainer" class="svg-viewport grid-dark">
-            <div id="svgContainer" class="svg-canvas">
-              <!-- Generated SVG inserted here -->
-            </div>
-          </div>
-        </div>
-
-        <!-- Sidebar / Actions & Stats -->
-        <div class="sidebar-column">
-          <!-- Action Buttons Card -->
-          <div class="card action-card">
-            <h3 class="card-heading">Export Actions</h3>
-            <div class="action-buttons">
-              <button id="sendTo3dBtn" class="btn btn-accent btn-block">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-                  <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-                  <line x1="12" y1="22.08" x2="12" y2="12"></line>
-                </svg>
-                Send to 3D Nameplate Studio ➔
-              </button>
-
-              <button id="downloadSvgBtn" class="btn btn-primary btn-block">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="7 10 12 15 17 10"></polyline>
-                  <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
-                Download SVG File
-              </button>
-
-              <button id="downloadPngBtn" class="btn btn-secondary btn-block">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                  <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                  <polyline points="21 15 16 10 5 21"></polyline>
-                </svg>
-                Export High-Res PNG (4x)
-              </button>
-
-              <button id="copySvgBtn" class="btn btn-outline btn-block">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                </svg>
-                <span id="copyBtnText">Copy SVG Code</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Stats Card -->
-          <div class="card stats-card">
-            <h3 class="card-heading">Vector Properties</h3>
-            <div class="stats-grid">
-              <div class="stat-item">
-                <span class="stat-label">Dimensions</span>
-                <span id="statDims" class="stat-value">1536 × 1024</span>
-              </div>
-              <div class="stat-item">
-                <span class="stat-label">Vector Shapes</span>
-                <span id="statShapes" class="stat-value">205</span>
-              </div>
-              <div class="stat-item">
-                <span class="stat-label">Curve Loops</span>
-                <span id="statLoops" class="stat-value">403</span>
-              </div>
-              <div class="stat-item">
-                <span class="stat-label">Color Count</span>
-                <span id="statColors" class="stat-value">35</span>
-              </div>
-              <div class="stat-item">
-                <span class="stat-label">File Size</span>
-                <span id="statSize" class="stat-value">125 KB</span>
-              </div>
-              <div class="stat-item">
-                <span class="stat-label">Extract Time</span>
-                <span id="statTime" class="stat-value">2.7s</span>
-              </div>
-            </div>
-
-            <!-- Color Palette preview -->
-            <div class="palette-section">
-              <span class="palette-title">Color Palette</span>
-              <div id="paletteSwatches" class="palette-swatches"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Recent History Section -->
-    <section id="historySection" class="history-section hidden">
-      <div class="history-header">
-        <h2>Recent 3D Models & Extractions <span id="historyCountBadge" class="history-count-badge"></span></h2>
-        <button id="clearHistoryBtn" class="btn-link">Clear History</button>
-      </div>
-      <div id="historyList" class="history-grid"></div>
-    </section>
-  </div> <!-- /#vectorizerView -->
-
-  <!-- ==================== 3D FDM NAMEPLATE STUDIO VIEW ==================== -->
-  <div id="studioView" class="hidden">
-    <!-- Studio Header & Upload Toolbar -->
-    <section class="card studio-toolbar-card">
-      <div class="studio-toolbar">
-        <div class="toolbar-left">
-          <div class="studio-badge-pill">
-            <span class="badge-dot pulse"></span>
-            <span>BambuLab & Blender FDM Mode</span>
-          </div>
-          <div class="dimension-pill">
-            <span>Fixed Width: <strong>150 mm</strong></span>
-          </div>
-        </div>
-
-        <div class="toolbar-actions">
-          <input type="file" id="studioFileInput" accept=".svg" class="hidden" />
-          <button id="studioUploadBtn" class="btn btn-secondary">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="17 8 12 3 7 8"></polyline>
-              <line x1="12" y1="3" x2="12" y2="15"></line>
-            </svg>
-            Upload SVG File
-          </button>
-          <button id="studioSampleBtn" class="btn btn-outline">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="5 3 19 12 5 21 5 3"></polygon>
-            </svg>
-            Load Sample (Sunil Malviya)
-          </button>
-        </div>
-      </div>
-
-      <!-- Dropzone when no SVG is loaded -->
-      <div id="studioDropzone" class="studio-dropzone">
-        <div class="dropzone-icon">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-            <line x1="12" y1="22.08" x2="12" y2="12"></line>
-          </svg>
-        </div>
-        <h3>Drop any multi-color SVG here, or click Upload</h3>
-        <p>The system will automatically detect print sequence (Base 90%, Mid 5%, Top 5%) and prepare 150mm STLs for BambuLab.</p>
-      </div>
-    </section>
-
-    <!-- Studio Main Workspace (Split View) -->
-    <div id="studioWorkspace" class="studio-grid hidden">
-      <!-- Left Column: Layer Hierarchy & Settings -->
-      <div class="studio-sidebar">
-        <!-- Layer Print Sequence Card -->
-        <div class="card layer-stack-card">
-          <div class="card-header-row">
-            <div>
-              <h3 class="card-heading">Layer Print Sequence</h3>
-              <p class="card-subheading">Bottom to top sequential printing order</p>
-            </div>
-            <div class="header-actions-row">
-              <button id="btnUndo" class="btn-tool btn-undo" type="button" title="Undo (Ctrl+Z / Cmd+Z)" disabled>
-                ↶ Undo
-              </button>
-              <button id="btnRedo" class="btn-tool btn-redo" type="button" title="Redo (Ctrl+Y / Cmd+Shift+Z)" disabled>
-                ↷ Redo
-              </button>
-              <button id="btnAutoMergeSimilar" class="btn-tool btn-pulse-accent hidden" type="button" title="Merge similar shades into a single filament layer">
-                ⚡ Merge Similar Colors
-              </button>
-              <span id="layerCountBadge" class="badge badge-accent">3 Layers</span>
-            </div>
-          </div>
-
-          <div id="bgRemovedAlert" class="bg-removed-banner hidden">
-            <span>🛡️ <strong>Flat Background Stripped:</strong> Full-canvas background was removed so the badge contour becomes the true base plate.</span>
-            <button id="btnToggleBgRestore" class="btn-link" type="button">Restore</button>
-          </div>
-
-          <!-- Multi-Layer Selection & Merge Toolbar -->
-          <div id="multiMergeBar" class="multi-merge-bar hidden">
-            <div class="multi-merge-info">
-              <span class="multi-merge-icon">🔗</span>
-              <span id="selectedLayersBadge" class="badge badge-accent">2 Layers Selected</span>
-            </div>
-            <div class="multi-merge-actions">
-              <span class="merge-into-label">Into:</span>
-              <select id="multiMergeTargetSelect" class="multi-merge-select"></select>
-              <button id="btnConfirmMultiMerge" class="btn-tool btn-primary-sm" type="button" title="Fuse selected layers into solid fill (Weld)">Merge (Weld)</button>
-              <button id="btnConfirmMultiCombine" class="btn-tool btn-accent-sm" type="button" title="Combine selected layers and cut out overlapping areas into hollow holes (CorelDRAW Combine)">⧉ Combine (Hollow)</button>
-              <button id="btnCancelMultiSelect" class="btn-tool btn-cancel-sm" type="button" title="Clear selection">✕</button>
-            </div>
-          </div>
-
-          <div id="layersContainer" class="layer-items-list">
-            <!-- Dynamically populated layer rows -->
-          </div>
-        </div>
-
-        <!-- 3D Print Settings Card -->
-        <div class="card settings-card">
-          <h3 class="card-heading">Print Dimensions & Background</h3>
-          <div class="settings-form">
-            <div class="form-row-2">
-              <div class="input-field">
-                <label>Fixed Width (mm)</label>
-                <div class="input-unit">
-                  <input type="number" id="inputFixedWidth" value="150" min="50" max="350" step="1" />
-                  <span>mm</span>
-                </div>
-              </div>
-              <div class="input-field">
-                <label>Total Thickness (mm)</label>
-                <div class="input-unit">
-                  <input type="number" id="inputTotalThickness" value="10.0" min="0.1" max="100.0" step="0.1" />
-                  <span>mm</span>
+            <div class="form-options-row">
+              <div class="option-group">
+                <span class="option-title">SVG Layer Structure:</span>
+                <div class="segmented-control">
+                  <label class="seg-btn">
+                    <input type="radio" name="groupByOption" value="none" checked>
+                    <span>Standard Layering</span>
+                  </label>
+                  <label class="seg-btn">
+                    <input type="radio" name="groupByOption" value="color">
+                    <span>🎨 Group by Color (&lt;g&gt;)</span>
+                  </label>
                 </div>
               </div>
             </div>
 
-            <div class="checkbox-field">
-              <label class="toggle-control">
-                <input type="checkbox" id="chkRemoveBackground" checked />
-                <span class="toggle-slider"></span>
-                <span class="toggle-label">
-                  <strong>Remove Flat Background Color</strong>
-                  <small>Auto-strips full-canvas bounding background so outer silhouette becomes base plate</small>
-                </span>
-              </label>
-            </div>
-
-            <div class="checkbox-field">
-              <label class="toggle-control">
-                <input type="checkbox" id="chkSolidBase" checked />
-                <span class="toggle-slider"></span>
-                <span class="toggle-label">
-                  <strong>Solid Base Foundation (All Colors)</strong>
-                  <small>Unites all foreground paths into the base plate so top colors (purple, white, etc.) have a solid base</small>
-                </span>
-              </label>
-            </div>
-
-            <div class="checkbox-field">
-              <label class="toggle-control">
-                <input type="checkbox" id="chkAutoSolidify" checked />
-                <span class="toggle-slider"></span>
-                <span class="toggle-label">
-                  <strong>Auto-Solidify Underneath (Raised Layers)</strong>
-                  <small>Fills cutouts in lower plates under raised text/artwork so higher layers rest on a solid base without floating</small>
-                </span>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <!-- Export Actions Card -->
-        <div class="card studio-export-card">
-          <h3 class="card-heading">Export for Manufacturing</h3>
-          <div class="studio-actions-list">
-            <button id="btnExportZip" class="btn btn-primary btn-block btn-lg">
+            <button id="submitBtn" type="submit" class="btn btn-primary">
               <span class="btn-text">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                   <polyline points="7 10 12 15 17 10"></polyline>
                   <line x1="12" y1="15" x2="12" y2="3"></line>
                 </svg>
-                Download BambuLab Package (.ZIP)
+                Extract Vector SVG
               </span>
               <span class="btn-loader">
-                <span class="spinner"></span> Generating 3D Package...
+                <span class="spinner"></span> Extracting...
               </span>
             </button>
+          </form>
 
-            <div class="export-sub-buttons">
-              <button id="btnExport3mf" class="btn btn-secondary">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
-                  <path d="M2 17l10 5 10-5"></path>
-                  <path d="M2 12l10 5 10-5"></path>
-                </svg>
-                Bambu Studio (.3MF)
-              </button>
-              <button id="btnExportCombined" class="btn btn-outline">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-                </svg>
-                Combined STL
-              </button>
-              <button id="btnViewGuide" class="btn btn-outline" title="View Filament Swap Guide">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                  <polyline points="14 2 14 8 20 8"></polyline>
-                  <line x1="16" y1="13" x2="8" y2="13"></line>
-                  <line x1="16" y1="17" x2="8" y2="17"></line>
-                </svg>
-                Print Guide
-              </button>
+          <!-- Progress Container -->
+          <div id="progressContainer" class="progress-section hidden">
+            <div class="progress-header">
+              <span id="progressStatus" class="progress-status">Connecting to stream...</span>
+              <span id="progressPercent" class="progress-percent">0%</span>
             </div>
-
-            <div id="studioExportStatus" class="export-status-banner hidden"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Right Column: Interactive 3D WebGL Viewport -->
-      <div class="studio-viewport-col">
-        <div class="card viewport-card-3d">
-          <div class="viewport-header-3d">
-            <div class="viewport-title-group">
-              <span class="indicator-dot live-dot"></span>
-              <span id="viewportModelName" class="viewport-name">3D Model Preview</span>
-              <span id="dimensionBadge" class="dimension-badge">150.0 × 99.98 × 3.0 mm</span>
+            <div class="progress-bar-track">
+              <div id="progressBar" class="progress-bar-fill" style="width: 0%;"></div>
             </div>
-
-            <!-- Viewport toolbar -->
-            <div class="viewport-tools">
-              <div class="btn-group-views">
-                <button class="btn-tool active" id="viewPerspective" title="3D Perspective Angle">3D</button>
-                <button class="btn-tool" id="viewFront" title="Straight Front View">Front</button>
-                <button class="btn-tool" id="viewTop" title="Top Down View">Top</button>
-                <button class="btn-tool" id="viewBottom" title="Bottom View (Inspect Debossed Branding)">Base (Bottom)</button>
-              </div>
-
-              <div class="divider-v"></div>
-
-              <!-- Explode layers slider -->
-              <div class="explode-control" title="Separate layers in Z to inspect stacking">
-                <label for="sliderExplode">Explode:</label>
-                <input type="range" id="sliderExplode" min="0" max="30" value="0" step="1" />
-                <span id="explodeValue">0mm</span>
-              </div>
-
-              <div class="divider-v"></div>
-
-              <button id="btnWireframe3D" class="btn-tool" title="Toggle Wireframe">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-                  <polyline points="2 17 12 22 22 17"></polyline>
-                </svg>
-                <span>Wire</span>
-              </button>
-              <button id="btnResetCamera" class="btn-tool" title="Reset Camera">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-                  <path d="M3 3v5h5"></path>
-                </svg>
-              </button>
+            <div class="progress-steps">
+              <div class="step" id="step-meta"><span class="step-icon"></span> Metadata</div>
+              <div class="step" id="step-ws"><span class="step-icon"></span> WebSocket</div>
+              <div class="step" id="step-chunks"><span class="step-icon"></span> Vector Chunks</div>
+              <div class="step" id="step-compile"><span class="step-icon"></span> SVG Geometry</div>
             </div>
           </div>
 
-          <!-- WebGL Three.js Container -->
-          <div id="threeContainer" class="three-viewport-box">
-            <!-- Three.js Canvas injected here -->
-            <div id="threeLoadingOverlay" class="three-loading hidden">
-              <div class="spinner-lg"></div>
-              <span>Extruding 3D Geometry...</span>
-            </div>
-
-            <!-- Interactive Color Selection & Inspection HUD -->
-            <div id="layerInspectHud" class="layer-inspect-hud hidden">
-              <span class="inspect-hud-dot" id="inspectHudColor" data-darkreader-ignore="true"></span>
-              <span class="inspect-hud-title" id="inspectHudTitle">Layer 1</span>
-              <span class="inspect-hud-stats" id="inspectHudStats">12 paths • 1.50mm</span>
-              <button id="btnDismissInspect" class="btn-inspect-close" type="button" title="Clear highlight">✕</button>
-            </div>
-          </div>
-
-          <!-- Viewport footer / hint -->
-          <div class="viewport-footer">
-            <span class="hint-text">💡 Left click + drag to rotate • Scroll wheel to zoom • Model locked in center</span>
-            <span class="hint-stats" id="threeStats">Meshes: 3 | 150mm Fixed</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div> <!-- /#studioView -->
-
-  <!-- Filament Swap Guide Modal -->
-  <div id="guideModal" class="modal-backdrop hidden">
-    <div class="modal-card">
-      <div class="modal-header">
-        <div class="modal-title-group">
-          <div class="modal-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-              <line x1="16" y1="13" x2="8" y2="13"></line>
-              <line x1="16" y1="17" x2="8" y2="17"></line>
+          <!-- Error Container -->
+          <div id="errorContainer" class="error-banner hidden">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
             </svg>
-          </div>
-          <div>
-            <h3>FDM 3D Printing & Filament Swap Guide</h3>
-            <p>Layer heights & pause instructions for BambuLab & single-nozzle printers</p>
+            <div class="error-text" id="errorMessage">Extraction failed</div>
           </div>
         </div>
-        <button id="closeGuideModal" class="btn-icon">✕</button>
-      </div>
-      <div class="modal-body">
-        <pre id="guideTextContent" class="guide-pre"></pre>
-      </div>
-      <div class="modal-footer">
-        <button id="copyGuideTextBtn" class="btn btn-primary">Copy Guide to Clipboard</button>
-        <button id="dismissGuideModal" class="btn btn-secondary">Close</button>
-      </div>
-    </div>
-  </div>
+      </section>
 
-  <!-- Order ID Modal for Debossed Branding & File Naming -->
-  <div id="orderIdModal" class="modal-backdrop hidden">
-    <div class="modal-card" style="max-width: 480px;">
-      <div class="modal-header">
-        <div class="modal-title-group">
-          <div class="modal-icon" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+      <!-- Result & Preview Section -->
+      <section id="resultSection" class="result-section hidden">
+        <div class="result-grid">
+          <!-- Preview Column -->
+          <div class="card preview-card">
+            <div class="preview-header">
+              <div class="preview-title">
+                <span class="indicator-dot"></span>
+                <span id="resultFilename">vector_result.svg</span>
+              </div>
+
+              <div class="preview-controls">
+                <!-- Background switcher -->
+                <div class="bg-switcher" title="Change canvas background">
+                  <button class="bg-opt active" data-bg="grid-dark" title="Dark Grid"></button>
+                  <button class="bg-opt" data-bg="grid-light" title="Light Grid"></button>
+                  <button class="bg-opt" data-bg="checker" title="Checkerboard"></button>
+                  <button class="bg-opt" data-bg="black" title="Pure Black"></button>
+                  <button class="bg-opt" data-bg="white" title="Pure White"></button>
+                </div>
+
+                <div class="divider-v"></div>
+
+                <!-- View toggles -->
+                <button id="toggleWireframe" class="btn-tool" title="Toggle Outlines / Wireframe">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                    <polygon points="2 17 12 22 22 17 12 12 2 17"></polygon>
+                  </svg>
+                  <span>Wireframe</span>
+                </button>
+
+                <button id="resetZoomBtn" class="btn-tool" title="Reset Zoom">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    <line x1="11" y1="8" x2="11" y2="14"></line>
+                    <line x1="8" y1="11" x2="14" y2="11"></line>
+                  </svg>
+                  <span>100%</span>
+                </button>
+              </div>
+            </div>
+
+            <div id="viewportContainer" class="svg-viewport grid-dark">
+              <div id="svgContainer" class="svg-canvas">
+                <!-- Generated SVG inserted here -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Sidebar / Actions & Stats -->
+          <div class="sidebar-column">
+            <!-- Action Buttons Card -->
+            <div class="card action-card">
+              <h3 class="card-heading">Export Actions</h3>
+              <div class="action-buttons">
+                <button id="sendTo3dBtn" class="btn btn-accent btn-block">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path
+                      d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
+                    </path>
+                    <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                    <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                  </svg>
+                  Send to 3D Nameplate Studio ➔
+                </button>
+
+                <button id="downloadSvgBtn" class="btn btn-primary btn-block">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                  </svg>
+                  Download SVG File
+                </button>
+
+                <button id="downloadPngBtn" class="btn btn-secondary btn-block">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                    <polyline points="21 15 16 10 5 21"></polyline>
+                  </svg>
+                  Export High-Res PNG (4x)
+                </button>
+
+                <button id="copySvgBtn" class="btn btn-outline btn-block">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                  <span id="copyBtnText">Copy SVG Code</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Stats Card -->
+            <div class="card stats-card">
+              <h3 class="card-heading">Vector Properties</h3>
+              <div class="stats-grid">
+                <div class="stat-item">
+                  <span class="stat-label">Dimensions</span>
+                  <span id="statDims" class="stat-value">1536 × 1024</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">Vector Shapes</span>
+                  <span id="statShapes" class="stat-value">205</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">Curve Loops</span>
+                  <span id="statLoops" class="stat-value">403</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">Color Count</span>
+                  <span id="statColors" class="stat-value">35</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">File Size</span>
+                  <span id="statSize" class="stat-value">125 KB</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">Extract Time</span>
+                  <span id="statTime" class="stat-value">2.7s</span>
+                </div>
+              </div>
+
+              <!-- Color Palette preview -->
+              <div class="palette-section">
+                <span class="palette-title">Color Palette</span>
+                <div id="paletteSwatches" class="palette-swatches"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Recent History Section -->
+      <section id="historySection" class="history-section hidden">
+        <div class="history-header">
+          <h2>Recent 3D Models & Extractions <span id="historyCountBadge" class="history-count-badge"></span></h2>
+          <button id="clearHistoryBtn" class="btn-link">Clear History</button>
+        </div>
+        <div id="historyList" class="history-grid"></div>
+      </section>
+    </div> <!-- /#vectorizerView -->
+
+    <!-- ==================== 3D FDM NAMEPLATE STUDIO VIEW ==================== -->
+    <div id="studioView" class="hidden">
+      <!-- Studio Header & Upload Toolbar -->
+      <section class="card studio-toolbar-card">
+        <div class="studio-toolbar">
+          <div class="toolbar-left">
+            <div class="studio-badge-pill">
+              <span class="badge-dot pulse"></span>
+              <span>BambuLab & Blender FDM Mode</span>
+            </div>
+            <div class="dimension-pill">
+              <span>Fixed Width: <strong>150 mm</strong></span>
+            </div>
+          </div>
+
+          <div class="toolbar-actions">
+            <input type="file" id="studioFileInput" accept=".svg" class="hidden" />
+            <button id="studioUploadBtn" class="btn btn-secondary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg>
+              Upload SVG File
+            </button>
+            <button id="studioSampleBtn" class="btn btn-outline">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              Load Sample (Sunil Malviya)
+            </button>
+          </div>
+        </div>
+
+        <!-- Dropzone when no SVG is loaded -->
+        <div id="studioDropzone" class="studio-dropzone">
+          <div class="dropzone-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path
+                d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
+              </path>
               <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
               <line x1="12" y1="22.08" x2="12" y2="12"></line>
             </svg>
           </div>
-          <div>
-            <h3>Enter Order ID</h3>
-            <p>Embeds VIVAGIFTS branding & Order ID debossed on the base layer</p>
+          <h3>Drop any multi-color SVG here, or click Upload</h3>
+          <p>The system will automatically detect print sequence (Base 90%, Mid 5%, Top 5%) and prepare 150mm STLs for
+            BambuLab.</p>
+        </div>
+      </section>
+
+      <!-- Studio Main Workspace (Split View) -->
+      <div id="studioWorkspace" class="studio-grid hidden">
+        <!-- Left Column: Layer Hierarchy & Settings -->
+        <div class="studio-sidebar">
+          <!-- Layer Print Sequence Card -->
+          <div class="card layer-stack-card">
+            <div class="card-header-row">
+              <div>
+                <h3 class="card-heading">Layer Print Sequence</h3>
+                <p class="card-subheading">Bottom to top sequential printing order</p>
+              </div>
+              <div class="header-actions-row">
+                <button id="btnUndo" class="btn-tool btn-undo" type="button" title="Undo (Ctrl+Z / Cmd+Z)" disabled>
+                  ↶ Undo
+                </button>
+                <button id="btnRedo" class="btn-tool btn-redo" type="button" title="Redo (Ctrl+Y / Cmd+Shift+Z)"
+                  disabled>
+                  ↷ Redo
+                </button>
+                <button id="btnAutoMergeSimilar" class="btn-tool btn-pulse-accent hidden" type="button"
+                  title="Merge similar shades into a single filament layer">
+                  ⚡ Merge Similar Colors
+                </button>
+                <span id="layerCountBadge" class="badge badge-accent">3 Layers</span>
+              </div>
+            </div>
+
+            <div id="bgRemovedAlert" class="bg-removed-banner hidden">
+              <span>🛡️ <strong>Flat Background Stripped:</strong> Full-canvas background was removed so the badge
+                contour becomes the true base plate.</span>
+              <button id="btnToggleBgRestore" class="btn-link" type="button">Restore</button>
+            </div>
+
+            <!-- Multi-Layer Selection & Merge Toolbar -->
+            <div id="multiMergeBar" class="multi-merge-bar hidden">
+              <div class="multi-merge-info">
+                <span class="multi-merge-icon">🔗</span>
+                <span id="selectedLayersBadge" class="badge badge-accent">2 Layers Selected</span>
+              </div>
+              <div class="multi-merge-actions">
+                <span class="merge-into-label">Into:</span>
+                <select id="multiMergeTargetSelect" class="multi-merge-select"></select>
+                <button id="btnConfirmMultiMerge" class="btn-tool btn-primary-sm" type="button"
+                  title="Fuse selected layers into solid fill (Weld)">Merge (Weld)</button>
+                <button id="btnConfirmMultiCombine" class="btn-tool btn-accent-sm" type="button"
+                  title="Combine selected layers and cut out overlapping areas into hollow holes (CorelDRAW Combine)">⧉
+                  Combine (Hollow)</button>
+                <button id="btnCancelMultiSelect" class="btn-tool btn-cancel-sm" type="button"
+                  title="Clear selection">✕</button>
+              </div>
+            </div>
+
+            <div id="layersContainer" class="layer-items-list">
+              <!-- Dynamically populated layer rows -->
+            </div>
+          </div>
+
+          <!-- 3D Print Settings Card -->
+          <div class="card settings-card">
+            <h3 class="card-heading">Print Dimensions & Background</h3>
+            <div class="settings-form">
+              <div class="form-row-2">
+                <div class="input-field">
+                  <label>Fixed Width (mm)</label>
+                  <div class="input-unit">
+                    <input type="number" id="inputFixedWidth" value="150" min="50" max="350" step="1" />
+                    <span>mm</span>
+                  </div>
+                </div>
+                <div class="input-field">
+                  <label>Total Thickness (mm)</label>
+                  <div class="input-unit">
+                    <input type="number" id="inputTotalThickness" value="10.0" min="0.1" max="100.0" step="0.1" />
+                    <span>mm</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="checkbox-field">
+                <label class="toggle-control">
+                  <input type="checkbox" id="chkRemoveBackground" checked />
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-label">
+                    <strong>Remove Flat Background Color</strong>
+                    <small>Auto-strips full-canvas bounding background so outer silhouette becomes base plate</small>
+                  </span>
+                </label>
+              </div>
+
+              <div class="checkbox-field">
+                <label class="toggle-control">
+                  <input type="checkbox" id="chkSolidBase" checked />
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-label">
+                    <strong>Solid Base Foundation (All Colors)</strong>
+                    <small>Unites all foreground paths into the base plate so top colors (purple, white, etc.) have a
+                      solid base</small>
+                  </span>
+                </label>
+              </div>
+
+              <div class="checkbox-field">
+                <label class="toggle-control">
+                  <input type="checkbox" id="chkAutoSolidify" checked />
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-label">
+                    <strong>Auto-Solidify Underneath (Raised Layers)</strong>
+                    <small>Fills cutouts in lower plates under raised text/artwork so higher layers rest on a solid base
+                      without floating</small>
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Export Actions Card -->
+          <div class="card studio-export-card">
+            <h3 class="card-heading">Export for Manufacturing</h3>
+            <div class="studio-actions-list">
+              <button id="btnExportZip" class="btn btn-primary btn-block btn-lg">
+                <span class="btn-text">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                  </svg>
+                  Download BambuLab Package (.ZIP)
+                </span>
+                <span class="btn-loader">
+                  <span class="spinner"></span> Generating 3D Package...
+                </span>
+              </button>
+
+              <div class="export-sub-buttons">
+                <button id="btnExport3mf" class="btn btn-secondary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                    <path d="M2 17l10 5 10-5"></path>
+                    <path d="M2 12l10 5 10-5"></path>
+                  </svg>
+                  Bambu Studio (.3MF)
+                </button>
+                <button id="btnExportCombined" class="btn btn-outline">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path
+                      d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
+                    </path>
+                  </svg>
+                  Combined STL
+                </button>
+                <button id="btnViewGuide" class="btn btn-outline" title="View Filament Swap Guide">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                  </svg>
+                  Print Guide
+                </button>
+              </div>
+
+              <div id="studioExportStatus" class="export-status-banner hidden"></div>
+            </div>
           </div>
         </div>
-        <button id="closeOrderIdModal" class="btn-icon">✕</button>
-      </div>
-      <div class="modal-body" style="padding: 1.5rem;">
-        <label for="exportOrderIdInput" style="display:block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem; color: #e2e8f0;">
-          Order ID:
-        </label>
-        <input 
-          type="text" 
-          id="exportOrderIdInput" 
-          placeholder="e.g. 59689 or ORD-1042" 
-          autocomplete="off"
-          style="width: 100%; padding: 0.75rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: #fff; font-size: 1rem; font-family: var(--font-mono); outline: none; transition: border-color 0.2s;"
-        />
-        <div style="margin-top: 0.85rem; font-size: 0.78rem; line-height: 1.45; color: var(--text-muted); background: rgba(255,255,255,0.03); padding: 10px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.06);">
-          🏷️ <strong>Base Layer Debossing Preview:</strong><br>
-          • <strong>Line 1:</strong> <code>VIVAGIFTS</code> (centered brand hallmark)<br>
-          • <strong>Line 2:</strong> <code>Order #&lt;order-id&gt;</code> (sharp 0.6mm deboss)<br>
-          • Downloaded file will be named <code>&lt;order-id&gt;.3mf</code>, <code>&lt;order-id&gt;.stl</code>, etc.
+
+        <!-- Right Column: Interactive 3D WebGL Viewport -->
+        <div class="studio-viewport-col">
+          <div class="card viewport-card-3d">
+            <div class="viewport-header-3d">
+              <div class="viewport-title-group">
+                <span class="indicator-dot live-dot"></span>
+                <span id="viewportModelName" class="viewport-name">3D Model Preview</span>
+                <span id="dimensionBadge" class="dimension-badge">150.0 × 99.98 × 3.0 mm</span>
+              </div>
+
+              <!-- Viewport toolbar -->
+              <div class="viewport-tools">
+                <div class="btn-group-views">
+                  <button class="btn-tool active" id="viewPerspective" title="3D Perspective Angle">3D</button>
+                  <button class="btn-tool" id="viewFront" title="Straight Front View">Front</button>
+                  <button class="btn-tool" id="viewTop" title="Top Down View">Top</button>
+                  <button class="btn-tool" id="viewBottom" title="Bottom View (Inspect Debossed Branding)">Base
+                    (Bottom)</button>
+                </div>
+
+                <div class="divider-v"></div>
+
+                <!-- Explode layers slider -->
+                <div class="explode-control" title="Separate layers in Z to inspect stacking">
+                  <label for="sliderExplode">Explode:</label>
+                  <input type="range" id="sliderExplode" min="0" max="30" value="0" step="1" />
+                  <span id="explodeValue">0mm</span>
+                </div>
+
+                <div class="divider-v"></div>
+
+                <button id="btnWireframe3D" class="btn-tool" title="Toggle Wireframe">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                    <polyline points="2 17 12 22 22 17"></polyline>
+                  </svg>
+                  <span>Wire</span>
+                </button>
+                <button id="btnResetCamera" class="btn-tool" title="Reset Camera">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                    <path d="M3 3v5h5"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- WebGL Three.js Container -->
+            <div id="threeContainer" class="three-viewport-box">
+              <!-- Three.js Canvas injected here -->
+              <div id="threeLoadingOverlay" class="three-loading hidden">
+                <div class="spinner-lg"></div>
+                <span>Extruding 3D Geometry...</span>
+              </div>
+
+              <!-- Interactive Color Selection & Inspection HUD -->
+              <div id="layerInspectHud" class="layer-inspect-hud hidden">
+                <span class="inspect-hud-dot" id="inspectHudColor" data-darkreader-ignore="true"></span>
+                <span class="inspect-hud-title" id="inspectHudTitle">Layer 1</span>
+                <span class="inspect-hud-stats" id="inspectHudStats">12 paths • 1.50mm</span>
+                <button id="btnDismissInspect" class="btn-inspect-close" type="button"
+                  title="Clear highlight">✕</button>
+              </div>
+            </div>
+
+            <!-- Viewport footer / hint -->
+            <div class="viewport-footer">
+              <span class="hint-text">💡 Left click + drag to rotate • Scroll wheel to zoom • Model locked in
+                center</span>
+              <span class="hint-stats" id="threeStats">Meshes: 3 | 150mm Fixed</span>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="modal-footer">
-        <button id="cancelOrderIdModal" class="btn btn-secondary">Cancel</button>
-        <button id="confirmOrderIdExportBtn" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981, #059669); border-color: #10b981;">Confirm & Export</button>
+    </div> <!-- /#studioView -->
+
+    <!-- Filament Swap Guide Modal -->
+    <div id="guideModal" class="modal-backdrop hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <div class="modal-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+              </svg>
+            </div>
+            <div>
+              <h3>FDM 3D Printing & Filament Swap Guide</h3>
+              <p>Layer heights & pause instructions for BambuLab & single-nozzle printers</p>
+            </div>
+          </div>
+          <button id="closeGuideModal" class="btn-icon">✕</button>
+        </div>
+        <div class="modal-body">
+          <pre id="guideTextContent" class="guide-pre"></pre>
+        </div>
+        <div class="modal-footer">
+          <button id="copyGuideTextBtn" class="btn btn-primary">Copy Guide to Clipboard</button>
+          <button id="dismissGuideModal" class="btn btn-secondary">Close</button>
+        </div>
       </div>
     </div>
-  </div>
+
+    <!-- Order ID Modal for Debossed Branding & File Naming -->
+    <div id="orderIdModal" class="modal-backdrop hidden">
+      <div class="modal-card" style="max-width: 480px;">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <div class="modal-icon" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path
+                  d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
+                </path>
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                <line x1="12" y1="22.08" x2="12" y2="12"></line>
+              </svg>
+            </div>
+            <div>
+              <h3>Enter Order ID</h3>
+              <p>Embeds VIVAGIFTS branding & Order ID debossed on the base layer</p>
+            </div>
+          </div>
+          <button id="closeOrderIdModal" class="btn-icon">✕</button>
+        </div>
+        <div class="modal-body" style="padding: 1.5rem;">
+          <label for="exportOrderIdInput"
+            style="display:block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem; color: #e2e8f0;">
+            Order ID:
+          </label>
+          <input type="text" id="exportOrderIdInput" placeholder="e.g. 59689 or ORD-1042" autocomplete="off"
+            style="width: 100%; padding: 0.75rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: #fff; font-size: 1rem; font-family: var(--font-mono); outline: none; transition: border-color 0.2s;" />
+          <div
+            style="margin-top: 0.85rem; font-size: 0.78rem; line-height: 1.45; color: var(--text-muted); background: rgba(255,255,255,0.03); padding: 10px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.06);">
+            🏷️ <strong>Base Layer Debossing Preview:</strong><br>
+            • <strong>Line 1:</strong> <code>VIVAGIFTS</code> (centered brand hallmark)<br>
+            • <strong>Line 2:</strong> <code>Order #&lt;order-id&gt;</code> (sharp 0.6mm deboss)<br>
+            • Downloaded file will be named <code>&lt;order-id&gt;.3mf</code>, <code>&lt;order-id&gt;.stl</code>, etc.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="cancelOrderIdModal" class="btn btn-secondary">Cancel</button>
+          <button id="confirmOrderIdExportBtn" class="btn btn-primary"
+            style="background: linear-gradient(135deg, #10b981, #059669); border-color: #10b981;">Confirm &
+            Export</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Footer -->
     <footer class="app-footer">
@@ -659,4 +683,5 @@
 
   <script src="app.js?v=4.1.2"></script>
 </body>
+
 </html>
