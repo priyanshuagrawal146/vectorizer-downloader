@@ -219,7 +219,6 @@ function analyzeSvgLayers(svgContent, options = {}) {
   let rawElements = [];
   let detectedBackground = null;
   const detectedBackgroundColors = new Set();
-  let removedBackgroundElements = [];
   const groupFillStack = [];
 
   while ((match = elemRegex.exec(svgContent)) !== null) {
@@ -294,16 +293,6 @@ function analyzeSvgLayers(svgContent, options = {}) {
     rawElements.push({ fill, d, bbox });
   }
 
-  // A vectorizer may split the flat background into one full-canvas contour
-  // plus many same-colored interior fragments. Removing only the large contour
-  // leaves those fragments floating above the artwork (for example inside bike
-  // wheels) and can make them part of the printable base. Remove every shape
-  // using a detected background color before classifying any print layers.
-  if (removeBackground && detectedBackgroundColors.size > 0) {
-    removedBackgroundElements = rawElements.filter(el => detectedBackgroundColors.has(el.fill.toLowerCase()));
-    rawElements = rawElements.filter(el => !detectedBackgroundColors.has(el.fill.toLowerCase()));
-  }
-
   if (rawElements.length === 0) {
     return { viewBox, width, height, aspectRatio: width / height, layerCount: 0, layers: [], detectedBackground, backgroundRemoved: false, similarColorPairs: [] };
   }
@@ -311,6 +300,26 @@ function analyzeSvgLayers(svgContent, options = {}) {
   // Find max single shape area
   const maxSingleArea = Math.max(...rawElements.map(e => e.bbox.area));
   const tier0Threshold = maxSingleArea * 0.05;
+
+  // Identify baseColor: color with highest total area
+  const colorAreaMap = new Map();
+  rawElements.forEach(el => {
+    colorAreaMap.set(el.fill, (colorAreaMap.get(el.fill) || 0) + el.bbox.area);
+  });
+  let baseColor = null;
+  let maxColorArea = -1;
+  for (const [c, a] of colorAreaMap.entries()) {
+    if (a > maxColorArea) {
+      maxColorArea = a;
+      baseColor = c;
+    }
+  }
+
+  const isBgShowThroughColor = (fill) => {
+    if (!removeBackground || !detectedBackground || !baseColor) return false;
+    const bgCol = detectedBackground.color.toLowerCase();
+    return (baseColor.toLowerCase() !== bgCol) && (fill.toLowerCase() === bgCol);
+  };
 
   // 1. Identify Tier 1 compound glyphs (letters/details with inner hole subpaths)
   const tier1CompoundElements = [];
@@ -350,13 +359,14 @@ function analyzeSvgLayers(svgContent, options = {}) {
   });
 
   // Classify details into Text (Tier 2) vs Artwork / Graphic Designs (Tier 1)
-  const detailElements = rawElements.filter(el => el.bbox.area < tier0Threshold && !holeElementSet.has(el));
+  const detailElements = rawElements.filter(el => el.bbox.area < tier0Threshold && !holeElementSet.has(el) && !isBgShowThroughColor(el.fill));
   const textSet = new Set();
 
   // 1. Horizontal Text Line Detection (e.g. SK LALU, TRAINING CENTRE, KARATE, CHIEF INSTRUCTOR...)
   for (let i = 0; i < detailElements.length; i++) {
     const a = detailElements[i];
     if (textSet.has(a)) continue;
+    if (detectedBackground && a.fill.toLowerCase() === detectedBackground.color.toLowerCase()) continue;
     if (a.bbox.height < 6 || a.bbox.height > 220) continue;
     const aRatio = a.bbox.width / (a.bbox.height || 1);
     if (aRatio > 4.0 || aRatio < 0.08) continue;
@@ -438,7 +448,7 @@ function analyzeSvgLayers(svgContent, options = {}) {
           }
         }
       }
-      if (arcCount >= 1) {
+      if (arcCount >= 3) {
         textSet.add(a);
       }
     }
@@ -508,31 +518,35 @@ function analyzeSvgLayers(svgContent, options = {}) {
   // Tier 1: Design & Accents (all non-text shapes of each other color -> exactly 1 layer per color)
   // Tier 2: Raised Text Glyphs -> exactly 1 layer per color that has text
 
-  // 1. Identify baseColor: color with highest total area
-  const colorAreaMap = new Map();
-  rawElements.forEach(el => {
-    colorAreaMap.set(el.fill, (colorAreaMap.get(el.fill) || 0) + el.bbox.area);
-  });
-  let baseColor = null;
-  let maxColorArea = -1;
-  for (const [c, a] of colorAreaMap.entries()) {
-    if (a > maxColorArea) {
-      maxColorArea = a;
-      baseColor = c;
+  // 2. Smart background filter:
+  // When removing background, if the detected background color is NOT the primary baseColor of the artwork
+  // (for example, the grey backdrop in a bicycle SVG), strip interior show-through fragments (e.g. wheel openings).
+  // If the background color IS the primary baseColor (e.g. a white logo on a white card, or white badge),
+  // genuine white artwork, white plaques, white borders, and white text are 100% PRESERVED and never deleted!
+  if (removeBackground && detectedBackground && baseColor) {
+    const bgCol = detectedBackground.color.toLowerCase();
+    if (baseColor.toLowerCase() !== bgCol) {
+      rawElements = rawElements.filter(el => {
+        if (el.fill.toLowerCase() !== bgCol) return true;
+        if (textSet.has(el)) return true; // keep text
+        const isLarge = el.bbox.area > width * height * 0.25;
+        if (isLarge) return true; // keep large containers
+        // If this element contains any other artwork element, it is a structural container -> keep it!
+        let containsOtherArtwork = false;
+        for (let k = 0; k < rawElements.length; k++) {
+          const other = rawElements[k];
+          if (other === el || other.fill.toLowerCase() === bgCol) continue;
+          const ox = (other.bbox.minX + other.bbox.maxX) / 2;
+          const oy = (other.bbox.minY + other.bbox.maxY) / 2;
+          if (other.bbox.minX >= el.bbox.minX && other.bbox.maxX <= el.bbox.maxX && other.bbox.minY >= el.bbox.minY && other.bbox.maxY <= el.bbox.maxY) {
+            containsOtherArtwork = true;
+            break;
+          }
+        }
+        if (containsOtherArtwork) return true;
+        return false; // remove show-through background fragments (e.g. bike wheel spokes)
+      });
     }
-  }
-
-  // Keep meaningful interior background regions as transparent cutout
-  // candidates. The renderer applies them to whichever foreground geometry
-  // actually contains them, independent of the design's colors or subject.
-  const baseBackgroundCutoutPaths = [];
-  if (removeBackground) {
-    const seenCutouts = new Set();
-    removedBackgroundElements.forEach(el => {
-      if (!el.bbox || el.bbox.area < 12 || el.bbox.width < 2 || el.bbox.height < 2 || seenCutouts.has(el.d)) return;
-      seenCutouts.add(el.d);
-      baseBackgroundCutoutPaths.push(el.d);
-    });
   }
 
   const tierBuckets = new Map();
@@ -570,15 +584,6 @@ function analyzeSvgLayers(svgContent, options = {}) {
     if (el.bbox.maxX > b.maxX) b.maxX = el.bbox.maxX;
     if (el.bbox.maxY > b.maxY) b.maxY = el.bbox.maxY;
   });
-
-  if (baseBackgroundCutoutPaths.length > 0) {
-    // Background-colored regions can sit inside any foreground color (for
-    // example, wheel openings in an upper bicycle layer). Carry the same
-    // transparent regions through every layer so no color re-fills them.
-    tierBuckets.forEach(bucket => {
-      bucket.cutoutPaths = [...baseBackgroundCutoutPaths];
-    });
-  }
 
   const sortedBuckets = Array.from(tierBuckets.values()).sort((a, b) => {
     if (a.tier !== b.tier) return a.tier - b.tier;
