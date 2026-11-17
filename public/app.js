@@ -2563,6 +2563,10 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         baseSvgData.paths.forEach(svgPath => {
           const shapes = THREE.SVGLoader.createShapes(svgPath);
           shapes.forEach(shape => {
+            // When solidBase is active, base foundation plates are 100% solid backing
+            if (studioState.solidBase) {
+              shape.holes = [];
+            }
             const shapePts = shape.getPoints();
             if (shapePts && shapePts.length >= 3 && cutoutShapes.length > 0 && !studioState.solidBase) {
               const shapeBox = new THREE.Box2().setFromPoints(shapePts);
@@ -2591,6 +2595,9 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         const baseOwnShapes = [];
         baseOwnSvgData.paths.forEach(svgPath => {
           THREE.SVGLoader.createShapes(svgPath).forEach(sh => {
+            if (studioState.solidBase) {
+              sh.holes = [];
+            }
             const pts = sh.getPoints ? sh.getPoints() : [];
             if (pts.length >= 3) baseOwnShapes.push(sh);
           });
@@ -2638,9 +2645,8 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         const currentScale = totalW_mm / (studioState.analysis.width || 1536);
 
         // Build uniqueBaseShapes:
-        // 1. Add all base-layer own shapes, preserving genuine structural plates (bottomPlate stand plate, outer contour, bicycle, etc.)
+        // 1. Add all base-layer own shapes, preserving genuine structural plates (bottomPlate stand plate, outer contour)
         //    while filtering out any tiny duplicate shapes that are geometrically inside a larger plate.
-        //    Authentic SVG cutouts and holes (e.g. bicycle spokes, frame loops, letter counters) are 100% PRESERVED.
         const uniqueBaseShapes = [];
 
         baseOwnShapes.forEach((sh, sIdx) => {
@@ -2669,7 +2675,9 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           }
 
           if (!isContainedInsideOther) {
-            // Keep genuine holes (bicycle spokes, frame gaps, letter counters) intact!
+            if (studioState.solidBase) {
+              sh.holes = []; // 100% solid base foundation — eliminates slicer dots & puzzle cutouts
+            }
             uniqueBaseShapes.push({
               shape: sh,
               metric: mi,
@@ -2681,15 +2689,12 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         // 2. When solidBase is active: add structural foundation plates from upper layers
         // so models where upper layers contain outer borders, silhouettes or plates
         // (e.g. white circular border in 59878PURPLE, green badge in 598751) have a continuous,
-        // joined solid foundation plate without any layers hanging in mid-air.
-        // Inner text details (letters, numbers, punctuation dots) and shapes already supported
-        // by existing base shapes are strictly filtered out to prevent slicer dots and unwanted overlapping blocks!
+        // 100% full solid foundation plate without any layers hanging in mid-air.
+        // Inner text details (letters, numbers, punctuation dots) are strictly filtered out to prevent slicer dots!
         if (studioState.solidBase) {
           studioState.layers.forEach((l, lIdx) => {
             if (lIdx === 0) return; // skip base layer (already handled in step 1)
-            if (l.role === 'cutout' || l.role === 'top' || l.role === 'text' || l.isRaisedText) return;
-            const lName = (l.name || '').toLowerCase();
-            if (lName.includes('raised text') || lName.includes('text')) return;
+            if (l.role === 'cutout') return; // skip cutout layers
 
             const extraPaths = (l.paths || []).map(d => `<path fill="${layer.color}" d="${d}" />`).join('');
             if (!extraPaths) return;
@@ -2698,7 +2703,9 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
 
             extraSvgData.paths.forEach(svgPath => {
               THREE.SVGLoader.createShapes(svgPath).forEach(sh => {
-                // DO NOT wipe sh.holes: authentic SVG cutouts, rings, and loops MUST be preserved!
+                if (studioState.solidBase) {
+                  sh.holes = []; // 100% solid foundation plate (removes inner hollows/puzzle cutouts)
+                }
                 const pts = sh.getPoints ? sh.getPoints() : [];
                 if (pts.length < 3) return;
 
@@ -2715,33 +2722,41 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
                 const sCy = (sMinY + sMaxY) / 2;
                 const sW_mm = sW * currentScale;
                 const sH_mm = sH * currentScale;
+                const area_mm2 = sW_mm * sH_mm;
 
-                // A. Skip tiny specks or noise (< 3.0mm)
-                if (sW_mm < 3.0 && sH_mm < 3.0) {
+                // A. Skip tiny specks or noise (< 2.5mm)
+                if (sW_mm < 2.5 || sH_mm < 2.5) {
                   return;
                 }
 
-                // B. Check if this shape is already supported / covered by ANY existing base shape.
-                // If it is inside or heavily covered by an existing base plate, it is already supported
-                // and MUST NOT be duplicated into the base layer (eliminates slicer dots and false blocks!).
-                let isAlreadySupported = false;
-                for (let k = 0; k < uniqueBaseShapes.length; k++) {
-                  const exMetric = uniqueBaseShapes[k].metric;
-                  if (!exMetric) continue;
-                  if (exMetric.sW >= sW - 2 && exMetric.sH >= sH - 2 &&
-                      sMinX >= exMetric.sMinX - 2 && sMaxX <= exMetric.sMaxX + 2 &&
-                      sMinY >= exMetric.sMinY - 2 && sMaxY <= exMetric.sMaxY + 2) {
-                    const exPts = uniqueBaseShapes[k].shape.getPoints ? uniqueBaseShapes[k].shape.getPoints() : [];
-                    if (exPts.length >= 3 && otPointInPoly({ x: sCx, y: sCy }, exPts)) {
-                      isAlreadySupported = true;
-                      break;
+                // B. Identify if this is a major structural plate / border
+                // Any shape with dimension >= 18mm or bbox area >= 200 mm² is a structural plate
+                // (e.g. circular border in 59878, green badge in 598751) and must NEVER be dropped!
+                const isStructuralPlate = (sW_mm >= 18.0 || sH_mm >= 18.0 || area_mm2 >= 200.0);
+
+                if (!isStructuralPlate) {
+                  // For smaller shapes (letters, punctuation, small accents < 18mm):
+                  // Check if it is geometrically contained inside ANY existing base shape.
+                  // If it is inside an existing solid base plate, it is an inner detail
+                  // and must NOT be duplicated into the base layer at Z=0 (eliminates slicer dots!).
+                  let isContainedInsideExisting = false;
+                  for (let k = 0; k < uniqueBaseShapes.length; k++) {
+                    const exMetric = uniqueBaseShapes[k].metric;
+                    if (!exMetric) continue;
+                    if (exMetric.sW > sW && exMetric.sH > sH &&
+                        sMinX >= exMetric.sMinX - 1 && sMaxX <= exMetric.sMaxX + 1 &&
+                        sMinY >= exMetric.sMinY - 1 && sMaxY <= exMetric.sMaxY + 1) {
+                      const exPts = uniqueBaseShapes[k].shape.getPoints ? uniqueBaseShapes[k].shape.getPoints() : [];
+                      if (exPts.length >= 3 && otPointInPoly({ x: sCx, y: sCy }, exPts)) {
+                        isContainedInsideExisting = true;
+                        break;
+                      }
                     }
                   }
+                  if (isContainedInsideExisting) return;
                 }
-                if (isAlreadySupported) return;
 
                 // C. Genuine structural plate that expands base foundation silhouette (e.g. white border in 59878, green badge in 598751)
-                // sh.holes are preserved so outer borders remain rings and not solid disks!
                 uniqueBaseShapes.push({
                   shape: sh,
                   metric: {
@@ -2989,9 +3004,11 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
               metric.sMinY <= brandSafetyBox.maxY && metric.sMaxY >= brandSafetyBox.minY);
 
             if (!overlapsSafetyBox) {
-              // Does not touch branding zone: extrude from Z = 0 to ownExtrudeDepth (flat on print bed)
-              // Authentic SVG cutouts and holes (e.g. bicycle spokes, frame loops) are preserved!
+              // Does not touch branding zone: extrude 100% solid from Z = 0 to ownExtrudeDepth (flat on print bed)
               const geomShape = shape.clone();
+              if (studioState.solidBase) {
+                geomShape.holes = [];
+              }
               const geom = new THREE.ExtrudeGeometry(geomShape, {
                 depth: ownExtrudeDepth,
                 bevelEnabled: false,
@@ -3006,9 +3023,11 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
             } else {
               // OVERLAPS BRANDING SAFETY BOX (e.g. house reaching down into the stand plate):
               // 1. Upper solid mesh: extrude full original shape from Z = debossDepth to ownExtrudeDepth
-              // Authentic SVG cutouts and holes are preserved!
               if (remainingBaseDepth > 0.05) {
                 const upperShape = shape.clone();
+                if (studioState.solidBase) {
+                  upperShape.holes = [];
+                }
                 const upperGeom = new THREE.ExtrudeGeometry(upperShape, {
                   depth: remainingBaseDepth,
                   bevelEnabled: false,
