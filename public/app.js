@@ -2501,19 +2501,11 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
 
       if (isBase) {
         // 1. Base Layer: extrude foundation plate from Z = 0 to baseThickness
-        // When Solid Base is active, union all layers' paths so upper artwork never hangs in mid-air
+        // Strictly use base layer's own outline paths — zero upper paths injected to keep base infill 100% clean
         let basePathsHtml = '';
-        if (studioState.solidBase) {
-          studioState.layers.forEach(l => {
-            (l.paths || []).forEach(rawD => {
-              basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
-            });
-          });
-        } else {
-          (layer.paths || []).forEach(rawD => {
-            basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
-          });
-        }
+        (layer.paths || []).forEach(rawD => {
+          basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
+        });
         const baseSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
           <g fill="${layer.color}">${basePathsHtml}</g>
         </svg>`;
@@ -2611,50 +2603,62 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           bottomPlate = baseShapeMetrics[0];
         }
 
-        // Build uniqueBaseShapes, tagging each with isOwnBase:
-        //   isOwnBase: true  → from base layer's own paths → eligible for deboss treatment
-        //   isOwnBase: false → from upper layers (only added when solidBase=ON for solid fill) → just extrude flat, NO deboss
+        const currentScale = totalW_mm / (studioState.analysis.width || 1536);
+
+        // Build uniqueBaseShapes:
+        // 1. Add all base-layer own shapes, preserving genuine structural plates (bottomPlate stand plate, outer contour)
+        //    while filtering out any tiny duplicate shapes that are geometrically inside a larger plate.
         const uniqueBaseShapes = [];
 
-        if (studioState.solidBase) {
-          // First: add all base-layer OWN shapes (tagged isOwnBase: true)
-          // We re-use allBaseShapes entries that came from the base layer's own paths.
-          // Since baseSvgData when solidBase=ON includes all layers' paths, we need to identify which
-          // shapes in allBaseShapes are from the base layer. The simplest correct approach: build
-          // uniqueBaseShapes by directly using baseOwnShapes (already parsed) for the own base shapes,
-          // and then separately add each upper layer's shapes tagged isOwnBase: false.
+        baseOwnShapes.forEach((sh, sIdx) => {
+          const mi = baseShapeMetrics[sIdx];
+          if (!mi) return;
 
-          // Add own-base shapes (isOwnBase: true) with deboss eligibility
-          baseOwnShapes.forEach(sh => {
-            // DO NOT wipe holes: letter counters (A, D, O, B, etc.) and hollow loops must remain open.
-            // Target stand plate is solidified cleanly inside isTargetPlate for debossed hallmarks.
-            const pts = sh.getPoints ? sh.getPoints() : [];
-            if (pts.length < 3) return;
-            let sMinX = Infinity, sMaxX = -Infinity, sMinY = Infinity, sMaxY = -Infinity;
-            pts.forEach(p => {
-              if (p.x < sMinX) sMinX = p.x;
-              if (p.x > sMaxX) sMaxX = p.x;
-              if (p.y < sMinY) sMinY = p.y;
-              if (p.y > sMaxY) sMaxY = p.y;
-            });
-            const sW = sMaxX - sMinX; const sH = sMaxY - sMinY;
+          let isContainedInsideOther = false;
+          // Never drop bottomPlate (the stand plate) or a wide structural plate
+          const isStructuralPlate = (bottomPlate && mi.shapeIdx === bottomPlate.shapeIdx) ||
+            (mi.sW * currentScale >= 30.0 || mi.aspect >= 1.4);
+          if (!isStructuralPlate) {
+            for (let j = 0; j < baseShapeMetrics.length; j++) {
+              if (sIdx === j) continue;
+              const mj = baseShapeMetrics[j];
+              if (!mj) continue;
+              if (mj.sW > mi.sW && mj.sH > mi.sH &&
+                mi.sMinX >= mj.sMinX - 2 && mi.sMaxX <= mj.sMaxX + 2 &&
+                mi.sMinY >= mj.sMinY - 2 && mi.sMaxY <= mj.sMaxY + 2) {
+                const ptsJ = mj.shape.getPoints ? mj.shape.getPoints() : [];
+                if (ptsJ.length >= 3 && otPointInPoly({ x: mi.sCx, y: mi.sCy }, ptsJ)) {
+                  isContainedInsideOther = true;
+                  break;
+                }
+              }
+            }
+          }
+
+          if (!isContainedInsideOther) {
             uniqueBaseShapes.push({
               shape: sh,
-              metric: { shapeIdx: uniqueBaseShapes.length, shape: sh, sMinX, sMaxX, sMinY, sMaxY, sW, sH, sCx: (sMinX+sMaxX)/2, sCy: (sMinY+sMaxY)/2, aspect: sW/Math.max(1,sH) },
+              metric: mi,
               isOwnBase: true
             });
-          });
+          }
+        });
 
-          // Add shapes from upper layers (isOwnBase: false) — providing solid foundation under upper artwork
+        // 2. In solidBase mode, add ONLY large structural silhouette plates from upper non-text layers
+        //    that extend OUTSIDE existing base shapes into open air.
+        //    NEVER add Raised Text or shapes already covered by the base foundation!
+        if (studioState.solidBase) {
           studioState.layers.forEach((l, lIdx) => {
-            if (lIdx === 0) return; // skip base layer (already added above)
+            if (lIdx === 0) return;
+            // Never inject Raised Text into the base foundation
+            if (l.role === 'top' || l.role === 'raised' || (l.name && l.name.toLowerCase().includes('text'))) return;
+
             const extraHtml = (l.paths || []).map(d => `<path fill="${layer.color}" d="${d}" />`).join('');
             if (!extraHtml) return;
             const extraSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}"><g fill="${layer.color}">${extraHtml}</g></svg>`;
             const extraSvgData = loader.parse(extraSvgStr);
             extraSvgData.paths.forEach(svgPath => {
               THREE.SVGLoader.createShapes(svgPath).forEach(sh => {
-                // DO NOT wipe sh.holes: Preserve letter counter gaps (A, D, O, B, etc.) and hollow loops
                 const pts = sh.getPoints ? sh.getPoints() : [];
                 if (pts.length < 3) return;
                 let sMinX = Infinity, sMaxX = -Infinity, sMinY = Infinity, sMaxY = -Infinity;
@@ -2665,46 +2669,39 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
                   if (p.y > sMaxY) sMaxY = p.y;
                 });
                 const sW = sMaxX - sMinX; const sH = sMaxY - sMinY;
+                const sW_mm = sW * currentScale;
+                const sH_mm = sH * currentScale;
+                // Only large structural plates can form new foundation extensions:
+                if (sW_mm < 20.0 && sH_mm < 20.0) return;
+
+                // Check if this shape is already covered inside any existing base shape:
+                let isInsideExistingBase = false;
+                for (const { metric: baseMetric } of uniqueBaseShapes) {
+                  if (!baseMetric) continue;
+                  if (sMinX >= baseMetric.sMinX - 2 && sMaxX <= baseMetric.sMaxX + 2 &&
+                    sMinY >= baseMetric.sMinY - 2 && sMaxY <= baseMetric.sMaxY + 2) {
+                    const basePts = baseMetric.shape.getPoints ? baseMetric.shape.getPoints() : [];
+                    if (basePts.length >= 3 && otPointInPoly({ x: (sMinX + sMaxX) / 2, y: (sMinY + sMaxY) / 2 }, basePts)) {
+                      isInsideExistingBase = true;
+                      break;
+                    }
+                  }
+                }
+                if (isInsideExistingBase) return;
+
                 uniqueBaseShapes.push({
                   shape: sh,
-                  metric: { shapeIdx: uniqueBaseShapes.length, shape: sh, sMinX, sMaxX, sMinY, sMaxY, sW, sH, sCx: (sMinX+sMaxX)/2, sCy: (sMinY+sMaxY)/2, aspect: sW/Math.max(1,sH) },
+                  metric: { shapeIdx: uniqueBaseShapes.length, shape: sh, sMinX, sMaxX, sMinY, sMaxY, sW, sH, sCx: (sMinX + sMaxX) / 2, sCy: (sMinY + sMaxY) / 2, aspect: sW / Math.max(1, sH) },
                   isOwnBase: false
                 });
               });
             });
-          });
-        } else {
-          // solidBase OFF: use allBaseShapes with containment filter, all tagged isOwnBase: true
-          allBaseShapes.forEach((sh, i) => {
-            const mi = baseShapeMetrics[i] || (() => {
-              const pts = sh.getPoints ? sh.getPoints() : [];
-              let sMinX=Infinity,sMaxX=-Infinity,sMinY=Infinity,sMaxY=-Infinity;
-              pts.forEach(p=>{if(p.x<sMinX)sMinX=p.x;if(p.x>sMaxX)sMaxX=p.x;if(p.y<sMinY)sMinY=p.y;if(p.y>sMaxY)sMaxY=p.y;});
-              const sW=sMaxX-sMinX,sH=sMaxY-sMinY;
-              return {shapeIdx:i,shape:sh,sMinX,sMaxX,sMinY,sMaxY,sW,sH,sCx:(sMinX+sMaxX)/2,sCy:(sMinY+sMaxY)/2,aspect:sW/Math.max(1,sH)};
-            })();
-            let isContainedInsideOther = false;
-            for (let j = 0; j < allBaseShapes.length; j++) {
-              if (i === j) continue;
-              const mj = baseShapeMetrics[j];
-              if (!mj) continue;
-              if (mj.sW > mi.sW && mj.sH > mi.sH &&
-                  mi.sMinX >= mj.sMinX - 2 && mi.sMaxX <= mj.sMaxX + 2 &&
-                  mi.sMinY >= mj.sMinY - 2 && mi.sMaxY <= mj.sMaxY + 2) {
-                isContainedInsideOther = true;
-                break;
-              }
-            }
-            if (!isContainedInsideOther) {
-              uniqueBaseShapes.push({ shape: sh, metric: mi, isOwnBase: true });
-            }
           });
         }
 
         // Generate master debossed branding shapes ONCE
         masterDebossShapes = [];
         let brandBBox = null;
-        const currentScale = totalW_mm / (studioState.analysis.width || 1536);
 
         // Compute overall base bounding box from ALL shapes in uniqueBaseShapes
         let allBaseBounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
@@ -3001,22 +2998,12 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           }
         });
       } else {
-        // 2. Upper layers: sequential heights along Z, supported underneath so nothing hangs in air
+        // 2. Upper layers: sequential heights along Z, supported underneath by solid base foundation plate
+        // Strictly use this layer's own paths — zero higher paths injected to keep infill 100% clean without slicer dots
         let ownPathsHtml = '';
         (layer.paths || []).forEach(rawD => {
           ownPathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
         });
-
-        if (studioState.autoSolidifyPlates !== false && layer.role !== 'cutout') {
-          for (let upperIdx = idx + 1; upperIdx < studioState.layers.length; upperIdx++) {
-            const upperLayer = studioState.layers[upperIdx];
-            if (upperLayer && upperLayer.role !== 'cutout') {
-              (upperLayer.paths || []).forEach(rawD => {
-                ownPathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
-              });
-            }
-          }
-        }
 
         const ownSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
           <g fill="${layer.color}">${ownPathsHtml}</g>
