@@ -2560,117 +2560,93 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         </svg>`;
         const baseSvgData = loader.parse(baseSvgStr);
 
-        // Parse transparent background regions and explicit combine cutouts.
-        const cutoutShapes = [];
+        // Parse background cutout paths (shapes matching the detected background color)
+        const backgroundCutoutShapes = [];
         if (layer.cutoutPaths && layer.cutoutPaths.length > 0) {
           const cutoutSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
             <g>${layer.cutoutPaths.map(d => `<path d="${d}" />`).join('')}</g>
           </svg>`;
           const cutoutSvgData = loader.parse(cutoutSvgStr);
           cutoutSvgData.paths.forEach(svgP => {
-            const cShapes = THREE.SVGLoader.createShapes(svgP);
-            cShapes.forEach(cs => {
-              cutoutShapes.push(cs);
+            THREE.SVGLoader.createShapes(svgP).forEach(cs => {
+              backgroundCutoutShapes.push(cs);
             });
           });
         }
 
-        // Collect bounding boxes of all artwork shapes across layers to accurately distinguish
-        // genuine silhouette cutouts (like cycle spokes / hollow frame) from multi-color puzzle cutouts (under artwork)
-        const allArtworkShapes = [];
-        studioState.layers.forEach((l, lIdx) => {
-          if (l.role === 'cutout') return;
-          const col = l.color;
-          const paths = l.paths || [];
-          if (!paths.length) return;
-          const sSvg = loader.parse(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}"><g fill="${col}">${paths.map(d=>`<path d="${d}"/>`).join('')}</g></svg>`);
-          sSvg.paths.forEach(svgP => {
-            THREE.SVGLoader.createShapes(svgP).forEach(sh => {
-              const pts = sh.getPoints ? sh.getPoints() : [];
-              if (pts.length < 3) return;
-              let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-              pts.forEach(p => {
-                if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
-                if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
-              });
-              allArtworkShapes.push({ layerIdx: lIdx, color: col, minX, maxX, minY, maxY, pts });
-            });
+        const backgroundBBoxes = backgroundCutoutShapes.map(cs => {
+          const pts = cs.getPoints ? cs.getPoints() : [];
+          if (pts.length < 3) return null;
+          let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+          pts.forEach(p => {
+            if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
           });
-        });
+          return { minX, maxX, minY, maxY, pts, center: { x: (minX + maxX) / 2, y: (minY + maxY) / 2 } };
+        }).filter(Boolean);
 
-        // Keeps authentic outer silhouette cutouts (where NO other artwork exists) while
-        // filling in multi-color puzzle cutouts so the base provides 100% flat solid backing under all artwork.
-        const filterHolesForSolidBase = (shape, excludeLayerIdx) => {
-          if (!studioState.solidBase || !shape || !shape.holes || shape.holes.length === 0) return;
-          const genuineCutouts = [];
-          const candidateArt = (excludeLayerIdx !== undefined)
-            ? allArtworkShapes.filter(a => a.layerIdx !== excludeLayerIdx)
-            : allArtworkShapes;
+        // When solidBase is active:
+        // Any hole matching a background-color path is 100% genuine background cutout -> MAKE IT HOLLOW!
+        // Any hole NOT matching the background color is a multi-color puzzle cutout under artwork -> FILL IT SOLID!
+        const applyBackgroundCutoutHoles = (shape) => {
+          if (!studioState.solidBase || !shape) return;
+          if (backgroundBBoxes.length === 0) {
+            // No background color paths: preserve shape's natural holes
+            return;
+          }
+          const hostPoints = shape.getPoints ? shape.getPoints() : [];
+          if (hostPoints.length < 3) return;
 
-          shape.holes.forEach(hole => {
+          let hostMinX = Infinity, hostMaxX = -Infinity, hostMinY = Infinity, hostMaxY = -Infinity;
+          hostPoints.forEach(p => {
+            if (p.x < hostMinX) hostMinX = p.x; if (p.x > hostMaxX) hostMaxX = p.x;
+            if (p.y < hostMinY) hostMinY = p.y; if (p.y > hostMaxY) hostMaxY = p.y;
+          });
+
+          const matchedHoles = [];
+          const matchedBgIndices = new Set();
+
+          // 1. Keep existing holes that match a background cutout shape
+          (shape.holes || []).forEach(hole => {
             const pts = hole.getPoints ? hole.getPoints() : [];
             if (pts.length < 3) return;
-            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            let hMinX = Infinity, hMaxX = -Infinity, hMinY = Infinity, hMaxY = -Infinity;
             pts.forEach(p => {
-              if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
-              if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+              if (p.x < hMinX) hMinX = p.x; if (p.x > hMaxX) hMaxX = p.x;
+              if (p.y < hMinY) hMinY = p.y; if (p.y > hMaxY) hMaxY = p.y;
             });
 
-            let hasArtwork = false;
-            for (let k = 0; k < candidateArt.length; k++) {
-              const art = candidateArt[k];
-              if (minX < art.maxX - 1 && maxX > art.minX + 1 &&
-                  minY < art.maxY - 1 && maxY > art.minY + 1) {
-                hasArtwork = true;
+            for (let i = 0; i < backgroundBBoxes.length; i++) {
+              const bg = backgroundBBoxes[i];
+              if (Math.abs(bg.minX - hMinX) <= 2.5 && Math.abs(bg.maxX - hMaxX) <= 2.5 &&
+                  Math.abs(bg.minY - hMinY) <= 2.5 && Math.abs(bg.maxY - hMaxY) <= 2.5) {
+                matchedHoles.push(hole);
+                matchedBgIndices.add(i);
                 break;
               }
             }
-            if (!hasArtwork) {
-              genuineCutouts.push(hole);
-            }
           });
-          shape.holes = genuineCutouts;
-        };
 
-        // Background fragments represent transparent regions, not objects to
-        // extrude. Apply each one to every foreground/base shape that encloses
-        // it so solid-base construction cannot silently fill the holes back in.
-        const applyContainedBackgroundHoles = (shape) => {
-          if (!shape || cutoutShapes.length === 0) return;
-          const hostPoints = shape.getPoints ? shape.getPoints() : [];
-          if (hostPoints.length < 3) return;
-          cutoutShapes.forEach(cutout => {
-            const cutoutPoints = cutout.getPoints ? cutout.getPoints() : [];
-            if (cutoutPoints.length < 3) return;
-            const insideCount = cutoutPoints.reduce((count, point) =>
-              count + (otPointInPoly({ x: point.x, y: point.y }, hostPoints) ? 1 : 0), 0);
-            // SVG tracing can leave a few points on a shared edge. Require the
-            // cutout center and nearly all contour samples to be inside, while
-            // allowing small edge-touching imperfections from vectorization.
-            const cutoutCenter = cutoutPoints.reduce((sum, point) => ({ x: sum.x + point.x / cutoutPoints.length, y: sum.y + point.y / cutoutPoints.length }), { x: 0, y: 0 });
-            const hostBounds = hostPoints.reduce((bounds, point) => ({
-              minX: Math.min(bounds.minX, point.x), maxX: Math.max(bounds.maxX, point.x),
-              minY: Math.min(bounds.minY, point.y), maxY: Math.max(bounds.maxY, point.y)
-            }), { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
-            const cutoutBounds = cutoutPoints.reduce((bounds, point) => ({
-              minX: Math.min(bounds.minX, point.x), maxX: Math.max(bounds.maxX, point.x),
-              minY: Math.min(bounds.minY, point.y), maxY: Math.max(bounds.maxY, point.y)
-            }), { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
-            const bboxContained = cutoutBounds.minX >= hostBounds.minX - 1 && cutoutBounds.maxX <= hostBounds.maxX + 1 &&
-              cutoutBounds.minY >= hostBounds.minY - 1 && cutoutBounds.maxY <= hostBounds.maxY + 1;
-            if (bboxContained && insideCount / cutoutPoints.length >= 0.9 &&
-                otPointInPoly(cutoutCenter, hostPoints)) {
-              shape.holes.push(new THREE.Path(cutoutPoints));
+          // 2. Add any background cutout that is contained in this shape but not yet in shape.holes (without duplicating)
+          backgroundBBoxes.forEach((bg, bgIdx) => {
+            if (matchedBgIndices.has(bgIdx)) return;
+            if (bg.minX >= hostMinX - 1 && bg.maxX <= hostMaxX + 1 &&
+                bg.minY >= hostMinY - 1 && bg.maxY <= hostMaxY + 1) {
+              if (otPointInPoly(bg.center, hostPoints)) {
+                matchedHoles.push(new THREE.Path(bg.pts));
+                matchedBgIndices.add(bgIdx);
+              }
             }
           });
+
+          shape.holes = matchedHoles;
         };
 
         const allBaseShapes = [];
         baseSvgData.paths.forEach(svgPath => {
           const shapes = THREE.SVGLoader.createShapes(svgPath);
           shapes.forEach(shape => {
-            applyContainedBackgroundHoles(shape);
-            filterHolesForSolidBase(shape, 0);
+            applyBackgroundCutoutHoles(shape);
             allBaseShapes.push(shape);
           });
         });
@@ -2686,8 +2662,7 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         const baseOwnShapes = [];
         baseOwnSvgData.paths.forEach(svgPath => {
           THREE.SVGLoader.createShapes(svgPath).forEach(sh => {
-            applyContainedBackgroundHoles(sh);
-            filterHolesForSolidBase(sh, 0);
+            applyBackgroundCutoutHoles(sh);
             const pts = sh.getPoints ? sh.getPoints() : [];
             if (pts.length >= 3) baseOwnShapes.push(sh);
           });
@@ -2790,8 +2765,7 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
 
             extraSvgData.paths.forEach(svgPath => {
               THREE.SVGLoader.createShapes(svgPath).forEach(sh => {
-                applyContainedBackgroundHoles(sh);
-                filterHolesForSolidBase(sh, lIdx);
+                applyBackgroundCutoutHoles(sh);
                 const pts = sh.getPoints ? sh.getPoints() : [];
                 if (pts.length < 3) return;
 
