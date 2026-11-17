@@ -2660,6 +2660,83 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           }
         });
 
+        // 2. When solidBase is active: add structural foundation plates from upper artwork layers
+        // so models where upper layers bridge separate parts (e.g. green badge in 598751) have a continuous,
+        // joined solid foundation plate without any layers hanging in mid-air.
+        // Inner details (letters, icons, text, punctuation) are strictly filtered out to prevent slicer dots!
+        if (studioState.solidBase) {
+          studioState.layers.forEach((l, lIdx) => {
+            if (lIdx === 0) return; // skip base layer (already handled above)
+            if (l.role === 'top' || l.role === 'text' || l.role === 'cutout' || l.isRaisedText) return;
+            const lName = (l.name || '').toLowerCase();
+            if (lName.includes('raised text') || lName.includes('text')) return;
+
+            const extraPaths = (l.paths || []).map(d => `<path fill="${layer.color}" d="${d}" />`).join('');
+            if (!extraPaths) return;
+            const extraSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}"><g fill="${layer.color}">${extraPaths}</g></svg>`;
+            const extraSvgData = loader.parse(extraSvgStr);
+
+            extraSvgData.paths.forEach(svgPath => {
+              THREE.SVGLoader.createShapes(svgPath).forEach(sh => {
+                if (studioState.solidBase) {
+                  sh.holes = []; // 100% solid foundation plate
+                }
+                const pts = sh.getPoints ? sh.getPoints() : [];
+                if (pts.length < 3) return;
+
+                let sMinX = Infinity, sMaxX = -Infinity, sMinY = Infinity, sMaxY = -Infinity;
+                pts.forEach(p => {
+                  if (p.x < sMinX) sMinX = p.x;
+                  if (p.x > sMaxX) sMaxX = p.x;
+                  if (p.y < sMinY) sMinY = p.y;
+                  if (p.y > sMaxY) sMaxY = p.y;
+                });
+                const sW = sMaxX - sMinX;
+                const sH = sMaxY - sMinY;
+                const sCx = (sMinX + sMaxX) / 2;
+                const sCy = (sMinY + sMaxY) / 2;
+
+                // A. Skip tiny details, punctuation or small text (smaller than 6mm in real-world size)
+                if ((sW * currentScale < 6.0 && sH * currentScale < 6.0) || sW * currentScale < 2.0 || sH * currentScale < 2.0) {
+                  return;
+                }
+
+                // B. Skip if geometrically contained inside ANY existing base shape.
+                // This guarantees inner details (letters, icons, accents) inside a plate NEVER duplicate into base infill
+                let isContainedInsideExisting = false;
+                for (let k = 0; k < uniqueBaseShapes.length; k++) {
+                  const exMetric = uniqueBaseShapes[k].metric;
+                  if (!exMetric) continue;
+                  if (exMetric.sW > sW && exMetric.sH > sH &&
+                      sMinX >= exMetric.sMinX - 2 && sMaxX <= exMetric.sMaxX + 2 &&
+                      sMinY >= exMetric.sMinY - 2 && sMaxY <= exMetric.sMaxY + 2) {
+                    const exPts = uniqueBaseShapes[k].shape.getPoints ? uniqueBaseShapes[k].shape.getPoints() : [];
+                    if (exPts.length >= 3 && otPointInPoly({ x: sCx, y: sCy }, exPts)) {
+                      isContainedInsideExisting = true;
+                      break;
+                    }
+                  }
+                }
+                if (isContainedInsideExisting) return;
+
+                // C. Genuine structural plate that expands base foundation silhouette (e.g. green badge in 598751)
+                uniqueBaseShapes.push({
+                  shape: sh,
+                  metric: {
+                    shapeIdx: uniqueBaseShapes.length,
+                    shape: sh,
+                    sMinX, sMaxX, sMinY, sMaxY,
+                    sW, sH,
+                    sCx, sCy,
+                    aspect: sW / Math.max(1, sH)
+                  },
+                  isOwnBase: false
+                });
+              });
+            });
+          });
+        }
+
         // Generate master debossed branding shapes ONCE
         masterDebossShapes = [];
         let brandBBox = null;
@@ -2689,8 +2766,8 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           // Stand plate must touch the bottom edge of the model, have stand height (12-60mm), width >= 50mm, aspect >= 1.4
           let standPlate = null;
           let maxStandScore = -Infinity;
-          uniqueBaseShapes.forEach(({ metric }) => {
-            if (!metric) return;
+          uniqueBaseShapes.forEach(({ metric, isOwnBase }) => {
+            if (!metric || !isOwnBase) return;
             const distFromBottomMm = (allBaseBounds.maxY - metric.sMaxY) * currentScale;
             const standH_mm = metric.sH * currentScale;
             const standW_mm = metric.sW * currentScale;
@@ -2968,11 +3045,24 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         });
       } else {
         // 2. Upper layers: sequential heights along Z, supported underneath by solid base foundation plate
-        // Strictly use this layer's own paths — zero higher paths injected to keep infill 100% clean without slicer dots
         let ownPathsHtml = '';
         (layer.paths || []).forEach(rawD => {
           ownPathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
         });
+
+        // Auto-solidify underneath: if this layer is not cutout and studioState.autoSolidifyPlates is enabled,
+        // include paths from all upper layers that are raised on top,
+        // so this underlying plate becomes a 100% solid surface without hollow holes under raised text/artwork
+        if (studioState.autoSolidifyPlates !== false && layer.role !== 'cutout') {
+          for (let upperIdx = idx + 1; upperIdx < studioState.layers.length; upperIdx++) {
+            const upperLayer = studioState.layers[upperIdx];
+            if (upperLayer && upperLayer.role !== 'cutout') {
+              (upperLayer.paths || []).forEach(rawD => {
+                ownPathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
+              });
+            }
+          }
+        }
 
         const ownSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
           <g fill="${layer.color}">${ownPathsHtml}</g>
