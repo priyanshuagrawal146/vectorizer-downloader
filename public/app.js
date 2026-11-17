@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const STUDIO_ANALYSIS_REVISION = 10;
+  const STUDIO_ANALYSIS_REVISION = 11;
   // ==================== NAVIGATION TABS ====================
   // ── Debossed Base Branding Engine (VIVAGIFTS + Order ID) ──
   let brandingFont = null;
@@ -2847,20 +2847,23 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
                 }
 
                 // Check if this shape is already geometrically supported inside any existing base shape.
-                // If it is inside an existing solid base plate, it already has solid foundation underneath
-                // and must NOT be duplicated into the base layer at Z=0 (eliminates slicer dots & duplicate blocks!).
+                // Test boundary points of this shape: if at least 85% of points fall inside an existing solid base plate,
+                // it already has solid foundation underneath and must NOT be duplicated at Z=0 (eliminates slicer dots).
+                // If points fall outside (like outer borders, crescents, badges), it expands the silhouette and must be added!
                 let isContainedInsideExisting = false;
                 for (let k = 0; k < uniqueBaseShapes.length; k++) {
-                  const exMetric = uniqueBaseShapes[k].metric;
-                  if (!exMetric) continue;
-                  if (exMetric.sW > sW && exMetric.sH > sH &&
-                      sMinX >= exMetric.sMinX - 1 && sMaxX <= exMetric.sMaxX + 1 &&
-                      sMinY >= exMetric.sMinY - 1 && sMaxY <= exMetric.sMaxY + 1) {
-                    const exPts = uniqueBaseShapes[k].shape.getPoints ? uniqueBaseShapes[k].shape.getPoints() : [];
-                    if (exPts.length >= 3 && otPointInPoly({ x: sCx, y: sCy }, exPts)) {
-                      isContainedInsideExisting = true;
-                      break;
-                    }
+                  const exPts = uniqueBaseShapes[k].shape.getPoints ? uniqueBaseShapes[k].shape.getPoints() : [];
+                  if (exPts.length < 3) continue;
+
+                  const numSamples = Math.min(pts.length, 16);
+                  const step = Math.floor(pts.length / numSamples);
+                  let inCount = 0;
+                  for (let i = 0; i < numSamples; i++) {
+                    if (otPointInPoly(pts[i * step], exPts)) inCount++;
+                  }
+                  if (inCount / numSamples >= 0.85) {
+                    isContainedInsideExisting = true;
+                    break;
                   }
                 }
                 if (isContainedInsideExisting) return;
