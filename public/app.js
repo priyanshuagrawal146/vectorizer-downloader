@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const STUDIO_ANALYSIS_REVISION = 9;
+  const STUDIO_ANALYSIS_REVISION = 10;
   // ==================== NAVIGATION TABS ====================
   // ── Debossed Base Branding Engine (VIVAGIFTS + Order ID) ──
   let brandingFont = null;
@@ -2585,15 +2585,36 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           return { minX, maxX, minY, maxY, pts, center: { x: (minX + maxX) / 2, y: (minY + maxY) / 2 } };
         }).filter(Boolean);
 
+        // Collect bounding boxes of all upper artwork layers (non-base, non-cutout)
+        // to distinguish genuine empty air holes from multi-color puzzle cutouts under artwork
+        const upperBBoxes = [];
+        studioState.layers.forEach((l, lIdx) => {
+          if (lIdx === 0 || l.role === 'cutout') return;
+          const uPaths = l.paths || [];
+          if (uPaths.length === 0) return;
+          const uSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}"><g>${uPaths.map(d => `<path d="${d}"/>`).join('')}</g></svg>`;
+          const uSvgData = loader.parse(uSvgStr);
+          uSvgData.paths.forEach(p => {
+            THREE.SVGLoader.createShapes(p).forEach(s => {
+              const pts = s.getPoints ? s.getPoints() : [];
+              if (pts.length < 3) return;
+              let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+              pts.forEach(pt => {
+                if (pt.x < minX) minX = pt.x; if (pt.x > maxX) maxX = pt.x;
+                if (pt.y < minY) minY = pt.y; if (pt.y > maxY) maxY = pt.y;
+              });
+              upperBBoxes.push({ minX, maxX, minY, maxY, w: maxX - minX, h: maxY - minY });
+            });
+          });
+        });
+
         // When solidBase is active:
-        // Any hole matching a background-color path is 100% genuine background cutout -> MAKE IT HOLLOW!
-        // Any hole NOT matching the background color is a multi-color puzzle cutout under artwork -> FILL IT SOLID!
+        // Case A (SVG with background color): holes matching background cutout shapes are genuine hollow cutouts;
+        // all other holes are multi-color puzzle cutouts under artwork -> filled solid!
+        // Case B (SVG with transparent background): holes overlapping upper artwork are puzzle cutouts -> filled solid;
+        // holes with zero artwork from any other layer are genuine empty air -> kept hollow!
         const applyBackgroundCutoutHoles = (shape) => {
           if (!studioState.solidBase || !shape) return;
-          if (backgroundBBoxes.length === 0) {
-            // No background color paths: preserve shape's natural holes
-            return;
-          }
           const hostPoints = shape.getPoints ? shape.getPoints() : [];
           if (hostPoints.length < 3) return;
 
@@ -2603,41 +2624,78 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
             if (p.y < hostMinY) hostMinY = p.y; if (p.y > hostMaxY) hostMaxY = p.y;
           });
 
+          const currentHoles = shape.holes || [];
           const matchedHoles = [];
           const matchedBgIndices = new Set();
 
-          // 1. Keep existing holes that match a background cutout shape
-          (shape.holes || []).forEach(hole => {
-            const pts = hole.getPoints ? hole.getPoints() : [];
-            if (pts.length < 3) return;
-            let hMinX = Infinity, hMaxX = -Infinity, hMinY = Infinity, hMaxY = -Infinity;
-            pts.forEach(p => {
-              if (p.x < hMinX) hMinX = p.x; if (p.x > hMaxX) hMaxX = p.x;
-              if (p.y < hMinY) hMinY = p.y; if (p.y > hMaxY) hMaxY = p.y;
+          if (backgroundBBoxes.length > 0) {
+            // Case A: SVG has background-color paths
+            // 1. Keep existing holes that match a background cutout shape
+            currentHoles.forEach(hole => {
+              const pts = hole.getPoints ? hole.getPoints() : [];
+              if (pts.length < 3) return;
+              let hMinX = Infinity, hMaxX = -Infinity, hMinY = Infinity, hMaxY = -Infinity;
+              pts.forEach(p => {
+                if (p.x < hMinX) hMinX = p.x; if (p.x > hMaxX) hMaxX = p.x;
+                if (p.y < hMinY) hMinY = p.y; if (p.y > hMaxY) hMaxY = p.y;
+              });
+
+              for (let i = 0; i < backgroundBBoxes.length; i++) {
+                if (matchedBgIndices.has(i)) continue;
+                const bg = backgroundBBoxes[i];
+                if (Math.abs(bg.minX - hMinX) <= 2.5 && Math.abs(bg.maxX - hMaxX) <= 2.5 &&
+                    Math.abs(bg.minY - hMinY) <= 2.5 && Math.abs(bg.maxY - hMaxY) <= 2.5) {
+                  matchedHoles.push(hole);
+                  matchedBgIndices.add(i);
+                  break;
+                }
+              }
             });
 
-            for (let i = 0; i < backgroundBBoxes.length; i++) {
-              const bg = backgroundBBoxes[i];
-              if (Math.abs(bg.minX - hMinX) <= 2.5 && Math.abs(bg.maxX - hMaxX) <= 2.5 &&
-                  Math.abs(bg.minY - hMinY) <= 2.5 && Math.abs(bg.maxY - hMaxY) <= 2.5) {
-                matchedHoles.push(hole);
-                matchedBgIndices.add(i);
-                break;
+            // 2. Add any background cutout that is contained in this shape but not yet in shape.holes (without duplicating)
+            backgroundBBoxes.forEach((bg, bgIdx) => {
+              if (matchedBgIndices.has(bgIdx)) return;
+              if (bg.minX >= hostMinX - 1 && bg.maxX <= hostMaxX + 1 &&
+                  bg.minY >= hostMinY - 1 && bg.maxY <= hostMaxY + 1) {
+                if (otPointInPoly(bg.center, hostPoints)) {
+                  matchedHoles.push(new THREE.Path(bg.pts));
+                  matchedBgIndices.add(bgIdx);
+                }
               }
-            }
-          });
+            });
+          } else {
+            // Case B: SVG with transparent background (no background color paths)
+            currentHoles.forEach(hole => {
+              const pts = hole.getPoints ? hole.getPoints() : [];
+              if (pts.length < 3) return;
+              let hMinX = Infinity, hMaxX = -Infinity, hMinY = Infinity, hMaxY = -Infinity;
+              pts.forEach(p => {
+                if (p.x < hMinX) hMinX = p.x; if (p.x > hMaxX) hMaxX = p.x;
+                if (p.y < hMinY) hMinY = p.y; if (p.y > hMaxY) hMaxY = p.y;
+              });
+              const hW = hMaxX - hMinX, hH = hMaxY - hMinY;
+              const hArea = hW * hH;
 
-          // 2. Add any background cutout that is contained in this shape but not yet in shape.holes (without duplicating)
-          backgroundBBoxes.forEach((bg, bgIdx) => {
-            if (matchedBgIndices.has(bgIdx)) return;
-            if (bg.minX >= hostMinX - 1 && bg.maxX <= hostMaxX + 1 &&
-                bg.minY >= hostMinY - 1 && bg.maxY <= hostMaxY + 1) {
-              if (otPointInPoly(bg.center, hostPoints)) {
-                matchedHoles.push(new THREE.Path(bg.pts));
-                matchedBgIndices.add(bgIdx);
+              let overlapsArtwork = false;
+              for (const ub of upperBBoxes) {
+                const ox1 = Math.max(hMinX, ub.minX);
+                const ox2 = Math.min(hMaxX, ub.maxX);
+                const oy1 = Math.max(hMinY, ub.minY);
+                const oy2 = Math.min(hMaxY, ub.maxY);
+                if (ox2 > ox1 && oy2 > oy1) {
+                  const overlapArea = (ox2 - ox1) * (oy2 - oy1);
+                  if (overlapArea / Math.min(hArea, ub.w * ub.h) > 0.15) {
+                    overlapsArtwork = true;
+                    break;
+                  }
+                }
               }
-            }
-          });
+
+              if (!overlapsArtwork) {
+                matchedHoles.push(hole);
+              }
+            });
+          }
 
           shape.holes = matchedHoles;
         };
