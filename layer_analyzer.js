@@ -216,8 +216,10 @@ function analyzeSvgLayers(svgContent, options = {}) {
   // Find all elements including <g> tags for fill inheritance
   const elemRegex = /<(\/?g|path|rect|circle|polygon|ellipse)\b([^>]*)\/?>/gi;
   let match;
-  const rawElements = [];
+  let rawElements = [];
   let detectedBackground = null;
+  const detectedBackgroundColors = new Set();
+  let removedBackgroundElements = [];
   const groupFillStack = [];
 
   while ((match = elemRegex.exec(svgContent)) !== null) {
@@ -285,10 +287,21 @@ function analyzeSvgLayers(svgContent, options = {}) {
 
     if (isBackgroundPath(d, bbox, width, height)) {
       detectedBackground = { color: fill, bbox, d };
+      detectedBackgroundColors.add(fill.toLowerCase());
       if (removeBackground) continue;
     }
 
     rawElements.push({ fill, d, bbox });
+  }
+
+  // A vectorizer may split the flat background into one full-canvas contour
+  // plus many same-colored interior fragments. Removing only the large contour
+  // leaves those fragments floating above the artwork (for example inside bike
+  // wheels) and can make them part of the printable base. Remove every shape
+  // using a detected background color before classifying any print layers.
+  if (removeBackground && detectedBackgroundColors.size > 0) {
+    removedBackgroundElements = rawElements.filter(el => detectedBackgroundColors.has(el.fill.toLowerCase()));
+    rawElements = rawElements.filter(el => !detectedBackgroundColors.has(el.fill.toLowerCase()));
   }
 
   if (rawElements.length === 0) {
@@ -509,6 +522,19 @@ function analyzeSvgLayers(svgContent, options = {}) {
     }
   }
 
+  // Keep meaningful interior background regions as transparent cutout
+  // candidates. The renderer applies them to whichever foreground geometry
+  // actually contains them, independent of the design's colors or subject.
+  const baseBackgroundCutoutPaths = [];
+  if (removeBackground) {
+    const seenCutouts = new Set();
+    removedBackgroundElements.forEach(el => {
+      if (!el.bbox || el.bbox.area < 12 || el.bbox.width < 2 || el.bbox.height < 2 || seenCutouts.has(el.d)) return;
+      seenCutouts.add(el.d);
+      baseBackgroundCutoutPaths.push(el.d);
+    });
+  }
+
   const tierBuckets = new Map();
   rawElements.forEach(el => {
     let tier = 1;
@@ -544,6 +570,15 @@ function analyzeSvgLayers(svgContent, options = {}) {
     if (el.bbox.maxX > b.maxX) b.maxX = el.bbox.maxX;
     if (el.bbox.maxY > b.maxY) b.maxY = el.bbox.maxY;
   });
+
+  if (baseBackgroundCutoutPaths.length > 0) {
+    // Background-colored regions can sit inside any foreground color (for
+    // example, wheel openings in an upper bicycle layer). Carry the same
+    // transparent regions through every layer so no color re-fills them.
+    tierBuckets.forEach(bucket => {
+      bucket.cutoutPaths = [...baseBackgroundCutoutPaths];
+    });
+  }
 
   const sortedBuckets = Array.from(tierBuckets.values()).sort((a, b) => {
     if (a.tier !== b.tier) return a.tier - b.tier;
@@ -604,6 +639,7 @@ function analyzeSvgLayers(svgContent, options = {}) {
       heightPct,
       pathCount: bucket.pathCount,
       subpathCount: bucket.paths.length,
+      cutoutPaths: bucket.cutoutPaths || [],
       bbox: { minX: bucket.minX, minY: bucket.minY, maxX: bucket.maxX, maxY: bucket.maxY, width: w, height: h, bboxArea },
       paths: bucket.paths
     };
