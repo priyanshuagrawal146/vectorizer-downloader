@@ -2530,9 +2530,12 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         baseSvgData.paths.forEach(svgPath => {
           const shapes = THREE.SVGLoader.createShapes(svgPath);
           shapes.forEach(shape => {
-            // Preserve genuine hollow gaps (letter counters, keychain holes, gear centers)
+            // When solidBase is active, base foundation plates are 100% solid backing
+            if (studioState.solidBase) {
+              shape.holes = [];
+            }
             const shapePts = shape.getPoints();
-            if (shapePts && shapePts.length >= 3 && cutoutShapes.length > 0) {
+            if (shapePts && shapePts.length >= 3 && cutoutShapes.length > 0 && !studioState.solidBase) {
               const shapeBox = new THREE.Box2().setFromPoints(shapePts);
               cutoutShapes.forEach(cs => {
                 const cutPts = cs.getPoints();
@@ -2559,6 +2562,9 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         const baseOwnShapes = [];
         baseOwnSvgData.paths.forEach(svgPath => {
           THREE.SVGLoader.createShapes(svgPath).forEach(sh => {
+            if (studioState.solidBase) {
+              sh.holes = [];
+            }
             const pts = sh.getPoints ? sh.getPoints() : [];
             if (pts.length >= 3) baseOwnShapes.push(sh);
           });
@@ -2636,6 +2642,9 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           }
 
           if (!isContainedInsideOther) {
+            if (studioState.solidBase) {
+              sh.holes = []; // 100% solid base foundation — eliminates slicer dots & puzzle cutouts
+            }
             uniqueBaseShapes.push({
               shape: sh,
               metric: mi,
@@ -2688,6 +2697,10 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
                   }
                 }
                 if (isInsideExistingBase) return;
+
+                if (studioState.solidBase) {
+                  sh.holes = [];
+                }
 
                 uniqueBaseShapes.push({
                   shape: sh,
@@ -2932,7 +2945,11 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
 
             if (!overlapsSafetyBox) {
               // Does not touch branding zone: extrude 100% solid from Z = 0 to ownExtrudeDepth (flat on print bed)
-              const geom = new THREE.ExtrudeGeometry(shape, {
+              const geomShape = shape.clone();
+              if (studioState.solidBase) {
+                geomShape.holes = [];
+              }
+              const geom = new THREE.ExtrudeGeometry(geomShape, {
                 depth: ownExtrudeDepth,
                 bevelEnabled: false,
                 steps: 1,
@@ -2947,7 +2964,11 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
               // OVERLAPS BRANDING SAFETY BOX (e.g. house reaching down into the stand plate):
               // 1. Upper solid mesh: extrude full original shape from Z = debossDepth to ownExtrudeDepth
               if (remainingBaseDepth > 0.05) {
-                const upperGeom = new THREE.ExtrudeGeometry(shape, {
+                const upperShape = shape.clone();
+                if (studioState.solidBase) {
+                  upperShape.holes = [];
+                }
+                const upperGeom = new THREE.ExtrudeGeometry(upperShape, {
                   depth: remainingBaseDepth,
                   bevelEnabled: false,
                   steps: 1,
