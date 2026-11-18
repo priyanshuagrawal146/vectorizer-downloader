@@ -159,15 +159,24 @@ const server = http.createServer(async (req, res) => {
 
           let layerForSvg = layer;
           if (isBase && solid_base) {
-            // When solid_base is enabled, union paths from all layers so the base foundation
-            // spans the full outer silhouette (matching the browser 3D preview) without gaps or missing perimeter walls.
-            const structuralPaths = [];
-            (layers || [layer]).forEach(l => {
-              (l.paths || []).forEach(p => structuralPaths.push(p));
-            });
+            let basePaths = [];
+            if (analysis && analysis.backgroundRemoved && analysis.detectedBackground && analysis.detectedBackground.d) {
+              const { splitSubpaths } = require('./layer_analyzer');
+              const subs = splitSubpaths(analysis.detectedBackground.d);
+              if (subs.length > 1) {
+                basePaths = [...subs.slice(1), ...(layer.cutoutPaths || [])];
+              }
+            }
+            if (basePaths.length === 0) {
+              const structuralPaths = [];
+              (layers || [layer]).forEach(l => {
+                (l.paths || []).forEach(p => structuralPaths.push(p));
+              });
+              basePaths = structuralPaths.length > 0 ? structuralPaths : layer.paths;
+            }
             layerForSvg = {
               ...layer,
-              paths: structuralPaths.length > 0 ? structuralPaths : layer.paths
+              paths: basePaths
             };
           } else if (auto_solidify_plates !== false && layer.role !== 'cutout') {
             // Auto-solidify underneath: if higher layers sitting above this layer are raised on top,

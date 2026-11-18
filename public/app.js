@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const STUDIO_ANALYSIS_REVISION = 11;
+  const STUDIO_ANALYSIS_REVISION = 12;
   // ==================== NAVIGATION TABS ====================
   // ── Debossed Base Branding Engine (VIVAGIFTS + Order ID) ──
   let brandingFont = null;
@@ -83,6 +83,17 @@ document.addEventListener('DOMContentLoaded', () => {
       if (intersect) inside = !inside;
     }
     return inside;
+  }
+
+  function splitSubpaths(d) {
+    if (!d) return [];
+    const subpaths = [];
+    const regex = /([Mm][^Mm]+)/g;
+    let match;
+    while ((match = regex.exec(d)) !== null) {
+      subpaths.push(match[1].trim());
+    }
+    return subpaths;
   }
 
   function clipPolygonHalfPlane(points, val, axis, keepSmaller) {
@@ -2550,340 +2561,421 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
 
       if (isBase) {
         // 1. Base Layer: extrude foundation plate from Z = 0 to baseThickness
-        // Strictly use base layer's own outline paths — zero upper paths injected to keep base infill 100% clean
-        let basePathsHtml = '';
-        (layer.paths || []).forEach(rawD => {
-          basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
-        });
-        const baseSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
-          <g fill="${layer.color}">${basePathsHtml}</g>
-        </svg>`;
-        const baseSvgData = loader.parse(baseSvgStr);
+        const currentScale = totalW_mm / (studioState.analysis.width || 1536);
+        const bgPath = (studioState.analysis && studioState.analysis.detectedBackground && studioState.analysis.detectedBackground.d)
+          ? studioState.analysis.detectedBackground.d : null;
+        const bgSubs = bgPath ? splitSubpaths(bgPath) : [];
+        const hasBgSilhouette = (studioState.analysis && studioState.analysis.backgroundRemoved && bgSubs.length > 1);
 
-        // Parse background cutout paths (shapes matching the detected background color)
-        const backgroundCutoutShapes = [];
-        if (layer.cutoutPaths && layer.cutoutPaths.length > 0) {
-          const cutoutSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
-            <g>${layer.cutoutPaths.map(d => `<path d="${d}" />`).join('')}</g>
+        const uniqueBaseShapes = [];
+
+        if (hasBgSilhouette) {
+          // =========================================================================
+          // MODE A: Silhouette Foundation (Vectorizers with full-canvas background)
+          // The background cutout hole in Vectorizer.AI IS the unified outer silhouette
+          // of the entire artwork (nut, banners, factory, badges in ONE single contour).
+          // Punching out interior cutoutPaths (nut openings, wheel spokes) creates authentic
+          // hollow openings while keeping the entire rest of the base 100% solid, continuous,
+          // and flat without any gaps or injected upper artwork shapes!
+          // =========================================================================
+          const silhouetteSubpaths = bgSubs.slice(1);
+          const cutoutSubpaths = layer.cutoutPaths || [];
+          const combinedD = silhouetteSubpaths.join(' ') + (cutoutSubpaths.length > 0 ? (' ' + cutoutSubpaths.join(' ')) : '');
+
+          const baseSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
+            <path fill="${layer.color}" fill-rule="evenodd" d="${combinedD}" />
           </svg>`;
-          const cutoutSvgData = loader.parse(cutoutSvgStr);
-          cutoutSvgData.paths.forEach(svgP => {
-            THREE.SVGLoader.createShapes(svgP).forEach(cs => {
-              backgroundCutoutShapes.push(cs);
+          const baseSvgData = loader.parse(baseSvgStr);
+
+          const masterBaseShapes = [];
+          baseSvgData.paths.forEach(svgP => {
+            THREE.SVGLoader.createShapes(svgP).forEach(sh => {
+              const pts = sh.getPoints ? sh.getPoints() : [];
+              if (pts.length >= 3) masterBaseShapes.push(sh);
             });
           });
-        }
 
-        const backgroundBBoxes = backgroundCutoutShapes.map(cs => {
-          const pts = cs.getPoints ? cs.getPoints() : [];
-          if (pts.length < 3) return null;
-          let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-          pts.forEach(p => {
-            if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
-            if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
-          });
-          return { minX, maxX, minY, maxY, pts, center: { x: (minX + maxX) / 2, y: (minY + maxY) / 2 } };
-        }).filter(Boolean);
-
-        // Collect bounding boxes of all upper artwork layers (non-base, non-cutout)
-        // to distinguish genuine empty air holes from multi-color puzzle cutouts under artwork
-        const upperBBoxes = [];
-        studioState.layers.forEach((l, lIdx) => {
-          if (lIdx === 0 || l.role === 'cutout') return;
-          const uPaths = l.paths || [];
-          if (uPaths.length === 0) return;
-          const uSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}"><g>${uPaths.map(d => `<path d="${d}"/>`).join('')}</g></svg>`;
-          const uSvgData = loader.parse(uSvgStr);
-          uSvgData.paths.forEach(p => {
-            THREE.SVGLoader.createShapes(p).forEach(s => {
-              const pts = s.getPoints ? s.getPoints() : [];
-              if (pts.length < 3) return;
-              let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-              pts.forEach(pt => {
-                if (pt.x < minX) minX = pt.x; if (pt.x > maxX) maxX = pt.x;
-                if (pt.y < minY) minY = pt.y; if (pt.y > maxY) maxY = pt.y;
+          // Ensure all interior cutout paths are punched into masterBaseShapes
+          if (cutoutSubpaths.length > 0) {
+            const cutoutSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
+              <g>${cutoutSubpaths.map(d => `<path d="${d}" />`).join('')}</g>
+            </svg>`;
+            const cutoutSvgData = loader.parse(cutoutSvgStr);
+            const cutoutShapes = [];
+            cutoutSvgData.paths.forEach(svgP => {
+              THREE.SVGLoader.createShapes(svgP).forEach(cs => {
+                const cPts = cs.getPoints ? cs.getPoints() : [];
+                if (cPts.length >= 3) cutoutShapes.push(cs);
               });
-              upperBBoxes.push({ minX, maxX, minY, maxY, w: maxX - minX, h: maxY - minY });
             });
-          });
-        });
 
-        // When solidBase is active:
-        // Case A (SVG with background color): holes matching background cutout shapes are genuine hollow cutouts;
-        // all other holes are multi-color puzzle cutouts under artwork -> filled solid!
-        // Case B (SVG with transparent background): holes overlapping upper artwork are puzzle cutouts -> filled solid;
-        // holes with zero artwork from any other layer are genuine empty air -> kept hollow!
-        const applyBackgroundCutoutHoles = (shape) => {
-          if (!studioState.solidBase || !shape) return;
-          const hostPoints = shape.getPoints ? shape.getPoints() : [];
-          if (hostPoints.length < 3) return;
-
-          let hostMinX = Infinity, hostMaxX = -Infinity, hostMinY = Infinity, hostMaxY = -Infinity;
-          hostPoints.forEach(p => {
-            if (p.x < hostMinX) hostMinX = p.x; if (p.x > hostMaxX) hostMaxX = p.x;
-            if (p.y < hostMinY) hostMinY = p.y; if (p.y > hostMaxY) hostMaxY = p.y;
-          });
-
-          const currentHoles = shape.holes || [];
-          const matchedHoles = [];
-          const matchedBgIndices = new Set();
-
-          if (backgroundBBoxes.length > 0) {
-            // Case A: SVG has background-color paths
-            // 1. Keep existing holes that match a background cutout shape
-            currentHoles.forEach(hole => {
-              const pts = hole.getPoints ? hole.getPoints() : [];
-              if (pts.length < 3) return;
-              let hMinX = Infinity, hMaxX = -Infinity, hMinY = Infinity, hMaxY = -Infinity;
-              pts.forEach(p => {
-                if (p.x < hMinX) hMinX = p.x; if (p.x > hMaxX) hMaxX = p.x;
-                if (p.y < hMinY) hMinY = p.y; if (p.y > hMaxY) hMaxY = p.y;
+            masterBaseShapes.forEach(msh => {
+              const mPts = msh.getPoints ? msh.getPoints() : [];
+              if (mPts.length < 3) return;
+              let mMinX = Infinity, mMaxX = -Infinity, mMinY = Infinity, mMaxY = -Infinity;
+              mPts.forEach(p => {
+                if (p.x < mMinX) mMinX = p.x; if (p.x > mMaxX) mMaxX = p.x;
+                if (p.y < mMinY) mMinY = p.y; if (p.y > mMaxY) mMaxY = p.y;
               });
 
-              for (let i = 0; i < backgroundBBoxes.length; i++) {
-                if (matchedBgIndices.has(i)) continue;
-                const bg = backgroundBBoxes[i];
-                if (Math.abs(bg.minX - hMinX) <= 2.5 && Math.abs(bg.maxX - hMaxX) <= 2.5 &&
-                    Math.abs(bg.minY - hMinY) <= 2.5 && Math.abs(bg.maxY - hMaxY) <= 2.5) {
-                  matchedHoles.push(hole);
-                  matchedBgIndices.add(i);
-                  break;
-                }
-              }
-            });
+              cutoutShapes.forEach(cs => {
+                const cPts = cs.getPoints ? cs.getPoints() : [];
+                if (cPts.length < 3) return;
+                let cMinX = Infinity, cMaxX = -Infinity, cMinY = Infinity, cMaxY = -Infinity;
+                cPts.forEach(p => {
+                  if (p.x < cMinX) cMinX = p.x; if (p.x > cMaxX) cMaxX = p.x;
+                  if (p.y < cMinY) cMinY = p.y; if (p.y > cMaxY) cMaxY = p.y;
+                });
 
-            // 2. Add any background cutout that is contained in this shape but not yet in shape.holes (without duplicating)
-            backgroundBBoxes.forEach((bg, bgIdx) => {
-              if (matchedBgIndices.has(bgIdx)) return;
-              if (bg.minX >= hostMinX - 1 && bg.maxX <= hostMaxX + 1 &&
-                  bg.minY >= hostMinY - 1 && bg.maxY <= hostMaxY + 1) {
-                if (otPointInPoly(bg.center, hostPoints)) {
-                  matchedHoles.push(new THREE.Path(bg.pts));
-                  matchedBgIndices.add(bgIdx);
-                }
-              }
-            });
-          } else {
-            // Case B: SVG with transparent background (no background color paths)
-            currentHoles.forEach(hole => {
-              const pts = hole.getPoints ? hole.getPoints() : [];
-              if (pts.length < 3) return;
-              let hMinX = Infinity, hMaxX = -Infinity, hMinY = Infinity, hMaxY = -Infinity;
-              pts.forEach(p => {
-                if (p.x < hMinX) hMinX = p.x; if (p.x > hMaxX) hMaxX = p.x;
-                if (p.y < hMinY) hMinY = p.y; if (p.y > hMaxY) hMaxY = p.y;
-              });
-              const hW = hMaxX - hMinX, hH = hMaxY - hMinY;
-              const hArea = hW * hH;
-
-              let overlapsArtwork = false;
-              for (const ub of upperBBoxes) {
-                const ox1 = Math.max(hMinX, ub.minX);
-                const ox2 = Math.min(hMaxX, ub.maxX);
-                const oy1 = Math.max(hMinY, ub.minY);
-                const oy2 = Math.min(hMaxY, ub.maxY);
-                if (ox2 > ox1 && oy2 > oy1) {
-                  const overlapArea = (ox2 - ox1) * (oy2 - oy1);
-                  if (overlapArea / Math.min(hArea, ub.w * ub.h) > 0.15) {
-                    overlapsArtwork = true;
+                let alreadyInHoles = false;
+                for (let h = 0; h < (msh.holes || []).length; h++) {
+                  const hPts = msh.holes[h].getPoints ? msh.holes[h].getPoints() : [];
+                  if (hPts.length < 3) continue;
+                  let hMinX = Infinity, hMaxX = -Infinity, hMinY = Infinity, hMaxY = -Infinity;
+                  hPts.forEach(p => {
+                    if (p.x < hMinX) hMinX = p.x; if (p.x > hMaxX) hMaxX = p.x;
+                    if (p.y < hMinY) hMinY = p.y; if (p.y > hMaxY) hMaxY = p.y;
+                  });
+                  if (Math.abs(hMinX - cMinX) <= 3 && Math.abs(hMaxX - cMaxX) <= 3 &&
+                      Math.abs(hMinY - cMinY) <= 3 && Math.abs(hMaxY - cMaxY) <= 3) {
+                    alreadyInHoles = true;
                     break;
                   }
                 }
-              }
 
-              if (!overlapsArtwork) {
-                matchedHoles.push(hole);
-              }
+                if (!alreadyInHoles && cMinX >= mMinX - 2 && cMaxX <= mMaxX + 2 && cMinY >= mMinY - 2 && cMaxY <= mMaxY + 2) {
+                  const center = { x: (cMinX + cMaxX) / 2, y: (cMinY + cMaxY) / 2 };
+                  if (otPointInPoly(center, mPts)) {
+                    msh.holes.push(new THREE.Path(cPts));
+                  }
+                }
+              });
             });
           }
 
-          shape.holes = matchedHoles;
-        };
-
-        const allBaseShapes = [];
-        baseSvgData.paths.forEach(svgPath => {
-          const shapes = THREE.SVGLoader.createShapes(svgPath);
-          shapes.forEach(shape => {
-            applyBackgroundCutoutHoles(shape);
-            allBaseShapes.push(shape);
-          });
-        });
-
-        // 1. Identify the bottom rectangular foundation plate for branding placement
-        // IMPORTANT: Always use ONLY the base layer's own paths to compute baseShapeMetrics and bottomPlate.
-        // Using allBaseShapes (which may include upper layer paths when solidBase=ON) would cause tiny letter
-        // shapes from upper layers to win as bottomPlate → garbled/tiny branding text.
-        const baseOwnSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
-          <g fill="${layer.color}">${(layer.paths || []).map(d => `<path fill="${layer.color}" d="${d}" />`).join('')}</g>
-        </svg>`;
-        const baseOwnSvgData = loader.parse(baseOwnSvgStr);
-        const baseOwnShapes = [];
-        baseOwnSvgData.paths.forEach(svgPath => {
-          THREE.SVGLoader.createShapes(svgPath).forEach(sh => {
-            applyBackgroundCutoutHoles(sh);
+          masterBaseShapes.forEach((sh, sIdx) => {
+            let sMinX = Infinity, sMaxX = -Infinity, sMinY = Infinity, sMaxY = -Infinity;
             const pts = sh.getPoints ? sh.getPoints() : [];
-            if (pts.length >= 3) baseOwnShapes.push(sh);
-          });
-        });
+            pts.forEach(p => {
+              if (p.x < sMinX) sMinX = p.x; if (p.x > sMaxX) sMaxX = p.x;
+              if (p.y < sMinY) sMinY = p.y; if (p.y > sMaxY) sMaxY = p.y;
+            });
+            const sW = sMaxX - sMinX;
+            const sH = sMaxY - sMinY;
 
-        const baseShapeMetrics = baseOwnShapes.map((sh, sIdx) => {
-          let sMinX = Infinity, sMaxX = -Infinity, sMinY = Infinity, sMaxY = -Infinity;
-          const sPoints = sh.getPoints ? sh.getPoints() : [];
-          sPoints.forEach(p => {
-            if (p.x < sMinX) sMinX = p.x;
-            if (p.x > sMaxX) sMaxX = p.x;
-            if (p.y < sMinY) sMinY = p.y;
-            if (p.y > sMaxY) sMaxY = p.y;
+            uniqueBaseShapes.push({
+              shape: sh,
+              metric: {
+                shapeIdx: sIdx,
+                shape: sh,
+                sMinX, sMaxX, sMinY, sMaxY,
+                sW, sH,
+                sCx: (sMinX + sMaxX) / 2,
+                sCy: (sMinY + sMaxY) / 2,
+                aspect: sW / Math.max(1, sH)
+              },
+              isOwnBase: true
+            });
           });
-          const sW = (sMaxX > sMinX) ? (sMaxX - sMinX) : 0;
-          const sH = (sMaxY > sMinY) ? (sMaxY - sMinY) : 0;
-          return {
-            shapeIdx: sIdx,
-            shape: sh,
-            sMinX, sMaxX, sMinY, sMaxY,
-            sW, sH,
-            sCx: (sMinX + sMaxX) / 2,
-            sCy: (sMinY + sMaxY) / 2,
-            aspect: sW / Math.max(1, sH)
-          };
-        });
+        } else {
+          // =========================================================================
+          // MODE B: Transparent SVG / Preserved Flat Background
+          // =========================================================================
+          let basePathsHtml = '';
+          (layer.paths || []).forEach(rawD => {
+            basePathsHtml += `<path fill="${layer.color}" d="${rawD}" />`;
+          });
+          const baseSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
+            <g fill="${layer.color}">${basePathsHtml}</g>
+          </svg>`;
+          const baseSvgData = loader.parse(baseSvgStr);
 
-        // Find the true wide rectangular base stand plate (highest sMaxY in SVG space, wide aspect ratio)
-        let bottomPlate = null;
-        let maxPlateScore = -Infinity;
-        baseShapeMetrics.forEach(m => {
-          if (m.sW < 100 || m.sH < 15) return;
-          // Heavily reward highest sMaxY (bottom of canvas in SVG) and wide aspect ratio
-          const score = (m.sMaxY * 4) + m.sW + (m.aspect > 1.8 ? 2000 : 0);
-          if (score > maxPlateScore) {
-            maxPlateScore = score;
-            bottomPlate = m;
+          // Parse background cutout paths
+          const backgroundCutoutShapes = [];
+          if (layer.cutoutPaths && layer.cutoutPaths.length > 0) {
+            const cutoutSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
+              <g>${layer.cutoutPaths.map(d => `<path d="${d}" />`).join('')}</g>
+            </svg>`;
+            const cutoutSvgData = loader.parse(cutoutSvgStr);
+            cutoutSvgData.paths.forEach(svgP => {
+              THREE.SVGLoader.createShapes(svgP).forEach(cs => {
+                backgroundCutoutShapes.push(cs);
+              });
+            });
           }
-        });
 
-        if (!bottomPlate && baseShapeMetrics.length > 0) {
-          bottomPlate = baseShapeMetrics[0];
-        }
+          const backgroundBBoxes = backgroundCutoutShapes.map(cs => {
+            const pts = cs.getPoints ? cs.getPoints() : [];
+            if (pts.length < 3) return null;
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            pts.forEach(p => {
+              if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+              if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+            });
+            return { minX, maxX, minY, maxY, pts, center: { x: (minX + maxX) / 2, y: (minY + maxY) / 2 } };
+          }).filter(Boolean);
 
-        const currentScale = totalW_mm / (studioState.analysis.width || 1536);
+          const upperBBoxes = [];
+          studioState.layers.forEach((l, lIdx) => {
+            if (lIdx === 0 || l.role === 'cutout') return;
+            const uPaths = l.paths || [];
+            if (uPaths.length === 0) return;
+            const uSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}"><g>${uPaths.map(d => `<path d="${d}"/>`).join('')}</g></svg>`;
+            const uSvgData = loader.parse(uSvgStr);
+            uSvgData.paths.forEach(p => {
+              THREE.SVGLoader.createShapes(p).forEach(s => {
+                const pts = s.getPoints ? s.getPoints() : [];
+                if (pts.length < 3) return;
+                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                pts.forEach(pt => {
+                  if (pt.x < minX) minX = pt.x; if (pt.x > maxX) maxX = pt.x;
+                  if (pt.y < minY) minY = pt.y; if (pt.y > maxY) maxY = pt.y;
+                });
+                upperBBoxes.push({ minX, maxX, minY, maxY, w: maxX - minX, h: maxY - minY });
+              });
+            });
+          });
 
-        // Build uniqueBaseShapes:
-        // 1. Add all base-layer own shapes, preserving genuine structural plates (bottomPlate stand plate, outer contour)
-        //    while filtering out any tiny duplicate shapes that are geometrically inside a larger plate.
-        const uniqueBaseShapes = [];
+          const applyBackgroundCutoutHoles = (shape) => {
+            if (!studioState.solidBase || !shape) return;
+            const hostPoints = shape.getPoints ? shape.getPoints() : [];
+            if (hostPoints.length < 3) return;
 
-        baseOwnShapes.forEach((sh, sIdx) => {
-          const mi = baseShapeMetrics[sIdx];
-          if (!mi) return;
+            let hostMinX = Infinity, hostMaxX = -Infinity, hostMinY = Infinity, hostMaxY = -Infinity;
+            hostPoints.forEach(p => {
+              if (p.x < hostMinX) hostMinX = p.x; if (p.x > hostMaxX) hostMaxX = p.x;
+              if (p.y < hostMinY) hostMinY = p.y; if (p.y > hostMaxY) hostMaxY = p.y;
+            });
 
-          let isContainedInsideOther = false;
-          // Never drop bottomPlate (the stand plate) or a genuine structural plate (>= 18mm or area >= 200 mm²)
-          const isStructuralPlate = (bottomPlate && mi.shapeIdx === bottomPlate.shapeIdx) ||
-            (mi.sW * currentScale >= 18.0 || mi.sH * currentScale >= 18.0 || (mi.sW * mi.sH * currentScale * currentScale >= 200.0));
-          if (!isStructuralPlate) {
-            for (let j = 0; j < baseShapeMetrics.length; j++) {
-              if (sIdx === j) continue;
-              const mj = baseShapeMetrics[j];
-              if (!mj) continue;
-              if (mj.sW > mi.sW && mj.sH > mi.sH &&
-                mi.sMinX >= mj.sMinX - 2 && mi.sMaxX <= mj.sMaxX + 2 &&
-                mi.sMinY >= mj.sMinY - 2 && mi.sMaxY <= mj.sMaxY + 2) {
-                const ptsJ = mj.shape.getPoints ? mj.shape.getPoints() : [];
-                if (ptsJ.length >= 3 && otPointInPoly({ x: mi.sCx, y: mi.sCy }, ptsJ)) {
-                  isContainedInsideOther = true;
-                  break;
+            const currentHoles = shape.holes || [];
+            const matchedHoles = [];
+            const matchedBgIndices = new Set();
+
+            if (backgroundBBoxes.length > 0) {
+              currentHoles.forEach(hole => {
+                const pts = hole.getPoints ? hole.getPoints() : [];
+                if (pts.length < 3) return;
+                let hMinX = Infinity, hMaxX = -Infinity, hMinY = Infinity, hMaxY = -Infinity;
+                pts.forEach(p => {
+                  if (p.x < hMinX) hMinX = p.x; if (p.x > hMaxX) hMaxX = p.x;
+                  if (p.y < hMinY) hMinY = p.y; if (p.y > hMaxY) hMaxY = p.y;
+                });
+
+                for (let i = 0; i < backgroundBBoxes.length; i++) {
+                  if (matchedBgIndices.has(i)) continue;
+                  const bg = backgroundBBoxes[i];
+                  if (Math.abs(bg.minX - hMinX) <= 2.5 && Math.abs(bg.maxX - hMaxX) <= 2.5 &&
+                      Math.abs(bg.minY - hMinY) <= 2.5 && Math.abs(bg.maxY - hMaxY) <= 2.5) {
+                    matchedHoles.push(hole);
+                    matchedBgIndices.add(i);
+                    break;
+                  }
+                }
+              });
+
+              backgroundBBoxes.forEach((bg, bgIdx) => {
+                if (matchedBgIndices.has(bgIdx)) return;
+                if (bg.minX >= hostMinX - 1 && bg.maxX <= hostMaxX + 1 &&
+                    bg.minY >= hostMinY - 1 && bg.maxY <= hostMaxY + 1) {
+                  if (otPointInPoly(bg.center, hostPoints)) {
+                    matchedHoles.push(new THREE.Path(bg.pts));
+                    matchedBgIndices.add(bgIdx);
+                  }
+                }
+              });
+            } else {
+              currentHoles.forEach(hole => {
+                const pts = hole.getPoints ? hole.getPoints() : [];
+                if (pts.length < 3) return;
+                let hMinX = Infinity, hMaxX = -Infinity, hMinY = Infinity, hMaxY = -Infinity;
+                pts.forEach(p => {
+                  if (p.x < hMinX) hMinX = p.x; if (p.x > hMaxX) hMaxX = p.x;
+                  if (p.y < hMinY) hMinY = p.y; if (p.y > hMaxY) hMaxY = p.y;
+                });
+                const hW = hMaxX - hMinX, hH = hMaxY - hMinY;
+                const hArea = hW * hH;
+
+                let overlapsArtwork = false;
+                for (const ub of upperBBoxes) {
+                  const ox1 = Math.max(hMinX, ub.minX);
+                  const ox2 = Math.min(hMaxX, ub.maxX);
+                  const oy1 = Math.max(hMinY, ub.minY);
+                  const oy2 = Math.min(hMaxY, ub.maxY);
+                  if (ox2 > ox1 && oy2 > oy1) {
+                    const overlapArea = (ox2 - ox1) * (oy2 - oy1);
+                    if (overlapArea / Math.min(hArea, ub.w * ub.h) > 0.15) {
+                      overlapsArtwork = true;
+                      break;
+                    }
+                  }
+                }
+
+                if (!overlapsArtwork) {
+                  matchedHoles.push(hole);
+                }
+              });
+            }
+
+            shape.holes = matchedHoles;
+          };
+
+          const baseOwnSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}">
+            <g fill="${layer.color}">${(layer.paths || []).map(d => `<path fill="${layer.color}" d="${d}" />`).join('')}</g>
+          </svg>`;
+          const baseOwnSvgData = loader.parse(baseOwnSvgStr);
+          const baseOwnShapes = [];
+          baseOwnSvgData.paths.forEach(svgPath => {
+            THREE.SVGLoader.createShapes(svgPath).forEach(sh => {
+              applyBackgroundCutoutHoles(sh);
+              const pts = sh.getPoints ? sh.getPoints() : [];
+              if (pts.length >= 3) baseOwnShapes.push(sh);
+            });
+          });
+
+          const baseShapeMetrics = baseOwnShapes.map((sh, sIdx) => {
+            let sMinX = Infinity, sMaxX = -Infinity, sMinY = Infinity, sMaxY = -Infinity;
+            const sPoints = sh.getPoints ? sh.getPoints() : [];
+            sPoints.forEach(p => {
+              if (p.x < sMinX) sMinX = p.x;
+              if (p.x > sMaxX) sMaxX = p.x;
+              if (p.y < sMinY) sMinY = p.y;
+              if (p.y > sMaxY) sMaxY = p.y;
+            });
+            const sW = (sMaxX > sMinX) ? (sMaxX - sMinX) : 0;
+            const sH = (sMaxY > sMinY) ? (sMaxY - sMinY) : 0;
+            return {
+              shapeIdx: sIdx,
+              shape: sh,
+              sMinX, sMaxX, sMinY, sMaxY,
+              sW, sH,
+              sCx: (sMinX + sMaxX) / 2,
+              sCy: (sMinY + sMaxY) / 2,
+              aspect: sW / Math.max(1, sH)
+            };
+          });
+
+          let bottomCandidate = null;
+          let maxPlateScore = -Infinity;
+          baseShapeMetrics.forEach(m => {
+            if (m.sW < 100 || m.sH < 15) return;
+            const score = (m.sMaxY * 4) + m.sW + (m.aspect > 1.8 ? 2000 : 0);
+            if (score > maxPlateScore) {
+              maxPlateScore = score;
+              bottomCandidate = m;
+            }
+          });
+
+          baseOwnShapes.forEach((sh, sIdx) => {
+            const mi = baseShapeMetrics[sIdx];
+            if (!mi) return;
+
+            let isContainedInsideOther = false;
+            const isStructuralPlate = (bottomCandidate && mi.shapeIdx === bottomCandidate.shapeIdx) ||
+              (mi.sW * currentScale >= 18.0 || mi.sH * currentScale >= 18.0 || (mi.sW * mi.sH * currentScale * currentScale >= 200.0));
+            if (!isStructuralPlate) {
+              for (let j = 0; j < baseShapeMetrics.length; j++) {
+                if (sIdx === j) continue;
+                const mj = baseShapeMetrics[j];
+                if (!mj) continue;
+                if (mj.sW > mi.sW && mj.sH > mi.sH &&
+                  mi.sMinX >= mj.sMinX - 2 && mi.sMaxX <= mj.sMaxX + 2 &&
+                  mi.sMinY >= mj.sMinY - 2 && mi.sMaxY <= mj.sMaxY + 2) {
+                  const ptsJ = mj.shape.getPoints ? mj.shape.getPoints() : [];
+                  if (ptsJ.length >= 3 && otPointInPoly({ x: mi.sCx, y: mi.sCy }, ptsJ)) {
+                    isContainedInsideOther = true;
+                    break;
+                  }
                 }
               }
             }
-          }
 
-          if (!isContainedInsideOther) {
-            uniqueBaseShapes.push({
-              shape: sh,
-              metric: mi,
-              isOwnBase: true
-            });
-          }
-        });
+            if (!isContainedInsideOther) {
+              uniqueBaseShapes.push({
+                shape: sh,
+                metric: mi,
+                isOwnBase: true
+              });
+            }
+          });
 
-        // 2. When solidBase is active: add structural foundation plates from upper layers
-        // so models where upper layers contain outer borders, silhouettes or plates
-        // (e.g. white circular border in 59878PURPLE, green badge in 598751) have a continuous,
-        // 100% full solid foundation plate without any layers hanging in mid-air.
-        // Inner text details (letters, numbers, punctuation dots) are strictly filtered out to prevent slicer dots!
-        if (studioState.solidBase) {
-          studioState.layers.forEach((l, lIdx) => {
-            if (lIdx === 0) return; // skip base layer (already handled in step 1)
-            if (l.role === 'cutout') return; // skip cutout layers
+          // In Mode B only: add structural upper borders (e.g. white circular ring in 59878)
+          if (studioState.solidBase) {
+            studioState.layers.forEach((l, lIdx) => {
+              if (lIdx === 0 || l.role === 'cutout') return;
+              const extraPaths = (l.paths || []).map(d => `<path fill="${layer.color}" d="${d}" />`).join('');
+              if (!extraPaths) return;
+              const extraSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}"><g fill="${layer.color}">${extraPaths}</g></svg>`;
+              const extraSvgData = loader.parse(extraSvgStr);
 
-            const extraPaths = (l.paths || []).map(d => `<path fill="${layer.color}" d="${d}" />`).join('');
-            if (!extraPaths) return;
-            const extraSvgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${studioState.analysis.viewBox}" width="${studioState.analysis.width}" height="${studioState.analysis.height}"><g fill="${layer.color}">${extraPaths}</g></svg>`;
-            const extraSvgData = loader.parse(extraSvgStr);
+              extraSvgData.paths.forEach(svgPath => {
+                THREE.SVGLoader.createShapes(svgPath).forEach(sh => {
+                  applyBackgroundCutoutHoles(sh);
+                  const pts = sh.getPoints ? sh.getPoints() : [];
+                  if (pts.length < 3) return;
 
-            extraSvgData.paths.forEach(svgPath => {
-              THREE.SVGLoader.createShapes(svgPath).forEach(sh => {
-                applyBackgroundCutoutHoles(sh);
-                const pts = sh.getPoints ? sh.getPoints() : [];
-                if (pts.length < 3) return;
+                  let sMinX = Infinity, sMaxX = -Infinity, sMinY = Infinity, sMaxY = -Infinity;
+                  pts.forEach(p => {
+                    if (p.x < sMinX) sMinX = p.x; if (p.x > sMaxX) sMaxX = p.x;
+                    if (p.y < sMinY) sMinY = p.y; if (p.y > sMaxY) sMaxY = p.y;
+                  });
+                  const sW = sMaxX - sMinX;
+                  const sH = sMaxY - sMinY;
+                  const sW_mm = sW * currentScale;
+                  const sH_mm = sH * currentScale;
 
-                let sMinX = Infinity, sMaxX = -Infinity, sMinY = Infinity, sMaxY = -Infinity;
-                pts.forEach(p => {
-                  if (p.x < sMinX) sMinX = p.x;
-                  if (p.x > sMaxX) sMaxX = p.x;
-                  if (p.y < sMinY) sMinY = p.y;
-                  if (p.y > sMaxY) sMaxY = p.y;
-                });
-                const sW = sMaxX - sMinX;
-                const sH = sMaxY - sMinY;
-                const sCx = (sMinX + sMaxX) / 2;
-                const sCy = (sMinY + sMaxY) / 2;
-                const sW_mm = sW * currentScale;
-                const sH_mm = sH * currentScale;
+                  if (sW_mm < 2.5 || sH_mm < 2.5) return;
 
-                // A. Skip tiny specks or noise (< 2.5mm)
-                if (sW_mm < 2.5 || sH_mm < 2.5) {
-                  return;
-                }
+                  let isContainedInsideExisting = false;
+                  for (let k = 0; k < uniqueBaseShapes.length; k++) {
+                    const exPts = uniqueBaseShapes[k].shape.getPoints ? uniqueBaseShapes[k].shape.getPoints() : [];
+                    if (exPts.length < 3) continue;
 
-                // Check if this shape is already geometrically supported inside any existing base shape.
-                // Test boundary points of this shape: if at least 85% of points fall inside an existing solid base plate,
-                // it already has solid foundation underneath and must NOT be duplicated at Z=0 (eliminates slicer dots).
-                // If points fall outside (like outer borders, crescents, badges), it expands the silhouette and must be added!
-                let isContainedInsideExisting = false;
-                for (let k = 0; k < uniqueBaseShapes.length; k++) {
-                  const exPts = uniqueBaseShapes[k].shape.getPoints ? uniqueBaseShapes[k].shape.getPoints() : [];
-                  if (exPts.length < 3) continue;
-
-                  const numSamples = Math.min(pts.length, 16);
-                  const step = Math.floor(pts.length / numSamples);
-                  let inCount = 0;
-                  for (let i = 0; i < numSamples; i++) {
-                    if (otPointInPoly(pts[i * step], exPts)) inCount++;
+                    const numSamples = Math.min(pts.length, 16);
+                    const step = Math.floor(pts.length / numSamples);
+                    let inCount = 0;
+                    for (let i = 0; i < numSamples; i++) {
+                      if (otPointInPoly(pts[i * step], exPts)) inCount++;
+                    }
+                    if (inCount / numSamples >= 0.85) {
+                      isContainedInsideExisting = true;
+                      break;
+                    }
                   }
-                  if (inCount / numSamples >= 0.85) {
-                    isContainedInsideExisting = true;
-                    break;
-                  }
-                }
-                if (isContainedInsideExisting) return;
+                  if (isContainedInsideExisting) return;
 
-                // C. Genuine structural plate that expands base foundation silhouette (e.g. white border in 59878, green badge in 598751)
-                uniqueBaseShapes.push({
-                  shape: sh,
-                  metric: {
-                    shapeIdx: uniqueBaseShapes.length,
+                  uniqueBaseShapes.push({
                     shape: sh,
-                    sMinX, sMaxX, sMinY, sMaxY,
-                    sW, sH,
-                    sCx, sCy,
-                    aspect: sW / Math.max(1, sH)
-                  },
-                  isOwnBase: false
+                    metric: {
+                      shapeIdx: uniqueBaseShapes.length,
+                      shape: sh,
+                      sMinX, sMaxX, sMinY, sMaxY,
+                      sW, sH,
+                      sCx: (sMinX + sMaxX) / 2,
+                      sCy: (sMinY + sMaxY) / 2,
+                      aspect: sW / Math.max(1, sH)
+                    },
+                    isOwnBase: false
+                  });
                 });
               });
             });
-          });
+          }
+        }
+
+        let bottomPlate = null;
+        let maxPlateScore = -Infinity;
+        uniqueBaseShapes.forEach(({ metric }) => {
+          if (!metric) return;
+          if (metric.sW < 100 || metric.sH < 15) return;
+          const score = (metric.sMaxY * 4) + metric.sW + (metric.aspect > 1.8 ? 2000 : 0);
+          if (score > maxPlateScore) {
+            maxPlateScore = score;
+            bottomPlate = metric;
+          }
+        });
+
+        if (!bottomPlate && uniqueBaseShapes.length > 0) {
+          bottomPlate = uniqueBaseShapes[0].metric;
         }
 
         // Generate master debossed branding shapes ONCE
@@ -2952,9 +3044,9 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
 
           // Positioning:
           // Center horizontally and vertically inside the detected pen stand plate.
-          // If no separate stand plate is detected, center horizontally on the base and place ~17.5mm from bottom edge.
+          // If no separate stand plate is detected, center horizontally on the base and place ~13.5mm from bottom edge.
           let brandCx = standPlate ? standPlate.sCx : (allBaseBounds.minX + allBaseBounds.maxX) / 2;
-          let brandCy = standPlate ? standPlate.sCy : (allBaseBounds.maxY - (17.5 / currentScale));
+          let brandCy = standPlate ? standPlate.sCy : (allBaseBounds.maxY - (13.5 / currentScale));
 
           // Strict boundary clamp: text bottom must stay at least 7.0mm inside the base bottom edge,
           // and text top must stay at least 5.0mm inside the base top edge.
@@ -2980,6 +3072,9 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
           }
           if (!targetPlate && bottomPlate) {
             targetPlate = bottomPlate;
+          }
+          if (!targetPlate && uniqueBaseShapes.length > 0) {
+            targetPlate = uniqueBaseShapes[0].metric;
           }
 
           masterDebossShapes = generateBrandingShapes(studioState.orderId, brandCx, brandCy, targetWInSvg, studioState.orderAlphabet, studioState.orderArrow);

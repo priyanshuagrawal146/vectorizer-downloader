@@ -219,22 +219,6 @@ def process_nameplate_blender(config_path):
             o.data.dimensions = '2D'
             o.data.fill_mode = 'BOTH'
             o.data.resolution_u = 6
-            if is_base:
-                splines = list(o.data.splines)
-                if splines:
-                    spline_areas = []
-                    for sp in splines:
-                        pts = list(sp.bezier_points) if len(sp.bezier_points) > 0 else list(sp.points)
-                        if pts:
-                            xs = [p.co.x for p in pts]
-                            ys = [p.co.y for p in pts]
-                            area = (max(xs) - min(xs)) * (max(ys) - min(ys))
-                            spline_areas.append((area, sp))
-                    if spline_areas:
-                        spline_areas.sort(key=lambda x: x[0], reverse=True)
-                        # Keep outermost contour spline, strip inner hole cutouts so base is 100% solid
-                        for area, sp in spline_areas[1:]:
-                            o.data.splines.remove(sp)
 
         # Extrude each curve natively and convert to 3D manifold mesh
         mesh_parts = []
