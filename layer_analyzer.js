@@ -526,25 +526,48 @@ function analyzeSvgLayers(svgContent, options = {}) {
   if (removeBackground && detectedBackground && baseColor) {
     const bgCol = detectedBackground.color.toLowerCase();
     if (baseColor.toLowerCase() !== bgCol) {
+      // Find all inner hole bboxes of baseColor compound shapes
+      const baseHoleBBoxes = [];
+      rawElements.forEach(el => {
+        if (el.fill.toLowerCase() === baseColor.toLowerCase()) {
+          const subs = splitSubpaths(el.d);
+          if (subs.length > 1) {
+            for (let s = 1; s < subs.length; s++) {
+              baseHoleBBoxes.push(getApproxBBox(subs[s]));
+            }
+          }
+        }
+      });
+
       rawElements = rawElements.filter(el => {
         if (el.fill.toLowerCase() !== bgCol) return true;
         if (textSet.has(el)) return true; // keep text
+
+        // If this element matches an inner hole contour of baseColor, it is definitely a background show-through cutout!
+        const matchesBaseHole = baseHoleBBoxes.some(h => 
+          Math.abs(h.minX - el.bbox.minX) < 2.5 &&
+          Math.abs(h.maxX - el.bbox.maxX) < 2.5 &&
+          Math.abs(h.minY - el.bbox.minY) < 2.5 &&
+          Math.abs(h.maxY - el.bbox.maxY) < 2.5
+        );
+        if (matchesBaseHole) return false;
+
         const isLarge = el.bbox.area > width * height * 0.25;
         if (isLarge) return true; // keep large containers
-        // If this element contains any other artwork element, it is a structural container -> keep it!
-        let containsOtherArtwork = false;
+
+        // For any other shape of bgCol, only keep if it contains substantial distinct artwork
+        let containsSubstantialArtwork = false;
         for (let k = 0; k < rawElements.length; k++) {
           const other = rawElements[k];
           if (other === el || other.fill.toLowerCase() === bgCol) continue;
-          const ox = (other.bbox.minX + other.bbox.maxX) / 2;
-          const oy = (other.bbox.minY + other.bbox.maxY) / 2;
-          if (other.bbox.minX >= el.bbox.minX && other.bbox.maxX <= el.bbox.maxX && other.bbox.minY >= el.bbox.minY && other.bbox.maxY <= el.bbox.maxY) {
-            containsOtherArtwork = true;
+          if (other.bbox.area < el.bbox.area * 0.10) continue; // ignore tiny outline specks
+          if (other.bbox.minX >= el.bbox.minX - 1 && other.bbox.maxX <= el.bbox.maxX + 1 &&
+              other.bbox.minY >= el.bbox.minY - 1 && other.bbox.maxY <= el.bbox.maxY + 1) {
+            containsSubstantialArtwork = true;
             break;
           }
         }
-        if (containsOtherArtwork) return true;
-        return false; // remove show-through background fragments (e.g. bike wheel spokes)
+        return containsSubstantialArtwork;
       });
     }
   }
@@ -591,41 +614,40 @@ function analyzeSvgLayers(svgContent, options = {}) {
   });
 
   const totalBuckets = sortedBuckets.length;
-  const upperCount = Math.max(1, totalBuckets - 1);
-  const minColorThickMm = 1.00;
+  const hasRaisedText = sortedBuckets.some(b => b.tier === 2);
+  const maxUpperThickMm = hasRaisedText ? 2.00 : 1.00;
+  // Base layer foundation: default 8.00mm (or 9.00mm) so total standard model height is 10.00mm
+  const baseThicknessMm = (totalBuckets === 1) ? 10.00 : Math.max(2.00, parseFloat((10.00 - maxUpperThickMm).toFixed(2)));
+  const cumulativeZ = baseThicknessMm + maxUpperThickMm;
 
-  // Default step for upper color layers: minimum 1.00 mm
-  const defaultStepMm = (totalBuckets === 1) ? 0 : 1.00;
-  // Sum of upper color layers
-  const totalUpperThickness = (totalBuckets === 1) ? 0 : parseFloat((defaultStepMm * upperCount).toFixed(2));
-  // Base layer absorbs remainder so total is fully 10.00 mm (or at least 1.00 mm)
-  const baseThicknessMm = (totalBuckets === 1) ? 10.00 : Math.max(minColorThickMm, parseFloat((10.00 - totalUpperThickness).toFixed(2)));
-
-  let cumulativeZ = 0;
   const assigned = sortedBuckets.map((bucket, index) => {
     let role = 'mid';
     let heightPct = 10;
-    let thicknessMm = defaultStepMm;
+    let thicknessMm = 1.00;
     let name = `Layer ${index + 1}`;
+
+    let zStartMm = 0.00;
+    let zEndMm = baseThicknessMm;
 
     if (bucket.tier === 0 || index === 0) {
       role = 'base';
       thicknessMm = baseThicknessMm;
       name = 'Base Foundation';
-    } else if (index === totalBuckets - 1) {
-      role = (bucket.tier === 2) ? 'top' : 'mid';
-      name = (bucket.tier === 2) ? `Raised Text (${bucket.color})` : `Artwork / Details (${bucket.color})`;
-      const precedingUpperMm = parseFloat((defaultStepMm * (upperCount - 1)).toFixed(2));
-      thicknessMm = Math.max(minColorThickMm, parseFloat((totalUpperThickness - precedingUpperMm).toFixed(2)));
+      zStartMm = 0.00;
+      zEndMm = baseThicknessMm;
+    } else if (bucket.tier === 2 || (index === totalBuckets - 1 && bucket.tier === 2)) {
+      role = 'top';
+      name = `Raised Text (${bucket.color})`;
+      thicknessMm = 2.00;
+      zStartMm = baseThicknessMm;
+      zEndMm = parseFloat((baseThicknessMm + thicknessMm).toFixed(2));
     } else {
       role = 'mid';
-      name = (bucket.tier === 2) ? `Raised Details (${bucket.color})` : `Artwork / Details (${bucket.color})`;
-      thicknessMm = defaultStepMm;
+      name = `Artwork / Details (${bucket.color})`;
+      thicknessMm = 1.00;
+      zStartMm = baseThicknessMm;
+      zEndMm = parseFloat((baseThicknessMm + thicknessMm).toFixed(2));
     }
-
-    const zStartMm = parseFloat(cumulativeZ.toFixed(2));
-    const zEndMm = parseFloat((cumulativeZ + thicknessMm).toFixed(2));
-    cumulativeZ = zEndMm;
 
     const w = bucket.maxX > bucket.minX ? bucket.maxX - bucket.minX : 0;
     const h = bucket.maxY > bucket.minY ? bucket.maxY - bucket.minY : 0;

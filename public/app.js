@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const STUDIO_ANALYSIS_REVISION = 12;
+  const STUDIO_ANALYSIS_REVISION = 13;
   // ==================== NAVIGATION TABS ====================
   // ── Debossed Base Branding Engine (VIVAGIFTS + Order ID) ──
   let brandingFont = null;
@@ -1673,12 +1673,14 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
   // Update Z badges and base thickness input live without wiping the layers list DOM
   function updateRowZBadgesLive() {
     if (!studioState.layers || studioState.layers.length === 0) return;
-    let runningZ = 0;
+    const baseLayer = studioState.layers.find(l => l.role === 'base') || studioState.layers[0];
+    const baseThick = Math.max(0.10, parseFloat(baseLayer ? baseLayer.thicknessMm : 8.00));
+
     studioState.layers.forEach((layer, idx) => {
-      const thick = parseFloat(layer.thicknessMm) || 0.10;
-      const zStart = runningZ;
-      const zEnd = runningZ + thick;
-      runningZ = zEnd;
+      const isBase = (layer.role === 'base' || idx === 0);
+      const thick = isBase ? baseThick : Math.max(0.10, parseFloat(layer.thicknessMm) || 1.00);
+      const zStart = isBase ? 0 : baseThick;
+      const zEnd = zStart + thick;
       layer.zStartMm = zStart;
       layer.zEndMm = zEnd;
 
@@ -1812,9 +1814,8 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
       const isBase = (layer.role === 'base' || idx === 0);
       const stepThick = isBase ? baseThick : parseFloat(layer.thicknessMm);
       const thicknessMm = stepThick.toFixed(2);
-      const zStart = runningZ;
-      const zEnd = runningZ + stepThick;
-      runningZ = zEnd;
+      const zStart = isBase ? 0 : baseThick;
+      const zEnd = zStart + stepThick;
       layer.zStartMm = zStart;
       layer.zEndMm = zEnd;
 
@@ -2403,6 +2404,9 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
       if (b) b.classList.remove('active');
     });
     btn.classList.add('active');
+    if (typeof gridHelper !== 'undefined' && gridHelper) {
+      gridHelper.visible = (btn !== viewBottom);
+    }
   }
 
   // Dismiss Inspection button
@@ -2534,9 +2538,10 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         ? baseThickness 
         : Math.max(0.10, layer.thicknessMm !== undefined ? layer.thicknessMm : 1.00);
 
-      const ownZStart = runningZ;
+      // In multi-color 3D printing: the base foundation is at Z = 0..baseThickness,
+      // and all upper artwork layers sit solidly ON the base foundation at Z = baseThickness (zero floating air gaps!)
+      const ownZStart = isBase ? 0 : baseThickness;
       const ownExtrudeDepth = layerStepThick;
-      runningZ += layerStepThick;
 
       let masterDebossShapes = [];
 
@@ -2560,9 +2565,10 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
         </svg>`;
         const baseSvgData = loader.parse(baseSvgStr);
 
-        // Collect bounding boxes and shapes of all upper artwork layers (lIdx > 0, non-cutout)
-        // to distinguish genuine empty air holes (bicycle spokes, keyrings) from puzzle cutouts under artwork
+        // Collect bounding boxes, shapes, and sample points of all upper artwork layers (lIdx > 0, non-cutout)
+        // to distinguish genuine empty air holes (bicycle spokes, keyrings, open air cutouts) from puzzle cutouts under artwork
         const upperArtworks = [];
+        const upperSamplePoints = [];
         studioState.layers.forEach((l, lIdx) => {
           if (lIdx === 0 || l.role === 'cutout') return;
           const uPaths = l.paths || [];
@@ -2584,13 +2590,18 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
                 w: maxX - minX,
                 h: maxY - minY
               });
+              const numSamples = Math.min(pts.length, 12);
+              const step = Math.floor(pts.length / numSamples);
+              for (let k = 0; k < numSamples; k++) {
+                upperSamplePoints.push(pts[k * step]);
+              }
             });
           });
         });
 
         // Universal Base Hole Filter:
         // A hole in a base shape is a mosaic puzzle cutout under artwork IF AND ONLY IF
-        // an upper artwork shape sits inside or substantially overlaps this hole.
+        // an upper artwork shape physically sits inside this hole (verified via point-in-polygon).
         // In that case, when solidBase is ON, we fill it solid (remove it from shape.holes)
         // so upper artwork has a flat continuous physical bed underneath.
         // If NO upper artwork exists in or over this hole (like bicycle wheel spokes, keychain holes, open air),
@@ -2607,22 +2618,12 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
               if (p.x < hMinX) hMinX = p.x; if (p.x > hMaxX) hMaxX = p.x;
               if (p.y < hMinY) hMinY = p.y; if (p.y > hMaxY) hMaxY = p.y;
             });
-            const hW = hMaxX - hMinX, hH = hMaxY - hMinY;
-            const hArea = hW * hH;
 
             let overlapsArtwork = false;
-            for (let u = 0; u < upperArtworks.length; u++) {
-              const ua = upperArtworks[u];
-              const ox1 = Math.max(hMinX, ua.minX);
-              const ox2 = Math.min(hMaxX, ua.maxX);
-              const oy1 = Math.max(hMinY, ua.minY);
-              const oy2 = Math.min(hMaxY, ua.maxY);
-              if (ox2 > ox1 && oy2 > oy1) {
-                const overlapArea = (ox2 - ox1) * (oy2 - oy1);
-                const holeOverlapRatio = overlapArea / hArea;
-                // An artwork piece fits/covers this hole if it overlaps and is not an enclosing canvas/frame
-                const isMatchingPiece = ua.w <= Math.max(hW * 3.5, 30) && ua.h <= Math.max(hH * 3.5, 30);
-                if (holeOverlapRatio > 0.20 && isMatchingPiece) {
+            for (let i = 0; i < upperSamplePoints.length; i++) {
+              const sp = upperSamplePoints[i];
+              if (sp.x >= hMinX && sp.x <= hMaxX && sp.y >= hMinY && sp.y <= hMaxY) {
+                if (otPointInPoly(sp, pts)) {
                   overlapsArtwork = true;
                   break;
                 }
@@ -3081,10 +3082,33 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
               mesh.receiveShadow = true;
               layerGroup.add(mesh);
             } else {
-              // OVERLAPS BRANDING SAFETY BOX (e.g. house reaching down into the stand plate):
-              // 1. Upper solid mesh: extrude full original shape from Z = debossDepth to ownExtrudeDepth
+              // OVERLAPS BRANDING SAFETY BOX:
+              // 1. Lower debossed mesh (Z = 0 to debossDepth, touching print bed flat at Z=0!):
+              // Cleanly subtract master deboss cavity shapes without crude straight-line clipping
+              const debossedShape = shape.clone();
+              debossedShape.holes = (shape.holes || []).map(h => h.clone());
+              masterDebossShapes.forEach(b => {
+                let outer = b.points;
+                if (otPolyArea(outer) > 0) outer = outer.slice().reverse();
+                debossedShape.holes.push(new THREE.Path(outer.map(p => new THREE.Vector2(p.x, p.y))));
+              });
+
+              const lowerGeom = new THREE.ExtrudeGeometry(debossedShape, {
+                depth: debossDepth,
+                bevelEnabled: false,
+                steps: 1,
+                curveSegments: 6
+              });
+              const lowerMesh = new THREE.Mesh(lowerGeom, mat);
+              lowerMesh.position.z = 0;
+              lowerMesh.castShadow = true;
+              lowerMesh.receiveShadow = true;
+              layerGroup.add(lowerMesh);
+
+              // 2. Upper solid mesh: extrude full original shape from Z = debossDepth to ownExtrudeDepth
               if (remainingBaseDepth > 0.05) {
                 const upperShape = shape.clone();
+                upperShape.holes = (shape.holes || []).map(h => h.clone());
                 const upperGeom = new THREE.ExtrudeGeometry(upperShape, {
                   depth: remainingBaseDepth,
                   bevelEnabled: false,
@@ -3096,41 +3120,6 @@ const tabBtnVectorizer = document.getElementById('tabBtnVectorizer');
                 upperMesh.castShadow = true;
                 upperMesh.receiveShadow = true;
                 layerGroup.add(upperMesh);
-              }
-
-              // 2. Lower solid mesh (Z = 0 to debossDepth, touching print bed flat at Z=0!):
-              // Clip polygon against brandSafetyBox so ZERO geometry enters the branding cavity
-              const shapePts = shape.getPoints ? shape.getPoints() : [];
-              let clippedPts = shapePts;
-              if (shapePts && shapePts.length >= 3) {
-                if (metric.sMinY < brandSafetyBox.minY) {
-                  // Reaches down from top into branding box: clip so it stays strictly above brandSafetyBox.minY
-                  clippedPts = clipPolygonHalfPlane(shapePts, brandSafetyBox.minY, 'y', true);
-                } else if (metric.sMaxY > brandSafetyBox.maxY && metric.sMinY >= brandSafetyBox.minY) {
-                  // Reaches up from bottom into branding box: clip so it stays strictly below brandSafetyBox.maxY
-                  clippedPts = clipPolygonHalfPlane(shapePts, brandSafetyBox.maxY, 'y', false);
-                } else if (metric.sMinX < brandSafetyBox.minX) {
-                  clippedPts = clipPolygonHalfPlane(shapePts, brandSafetyBox.minX, 'x', true);
-                } else if (metric.sMaxX > brandSafetyBox.maxX) {
-                  clippedPts = clipPolygonHalfPlane(shapePts, brandSafetyBox.maxX, 'x', false);
-                } else {
-                  clippedPts = [];
-                }
-              }
-
-              if (clippedPts && clippedPts.length >= 3) {
-                const lowerShape = new THREE.Shape(clippedPts.map(p => new THREE.Vector2(p.x, p.y)));
-                const lowerGeom = new THREE.ExtrudeGeometry(lowerShape, {
-                  depth: debossDepth,
-                  bevelEnabled: false,
-                  steps: 1,
-                  curveSegments: 6
-                });
-                const lowerMesh = new THREE.Mesh(lowerGeom, mat);
-                lowerMesh.position.z = 0;
-                lowerMesh.castShadow = true;
-                lowerMesh.receiveShadow = true;
-                layerGroup.add(lowerMesh);
               }
             }
           }
@@ -3897,11 +3886,10 @@ ${meshObjectsXml}${assemblyObjectXml}  </resources>
           triangles.push([indexedMesh.verticesList[i1], indexedMesh.verticesList[i2], indexedMesh.verticesList[i3]]);
         }
 
-        const zStart = runningZ;
-        const zEnd = runningZ + thickMm;
+        const zStart = isBase ? 0 : baseThickness;
+        const zEnd = isBase ? baseThickness : (baseThickness + thickMm);
         const pauseStart = zStart;
         const pauseEnd = zEnd;
-        runningZ = zEnd;
 
         const rawName = layer.name || `Layer ${idx + 1}`;
         const cleanName = `${String(idx + 1).padStart(2, '0')}_${rawName.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
